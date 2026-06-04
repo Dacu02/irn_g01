@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'IRN_G01'
+package_name = 'irn_g01'
 
 setup(
     name=package_name,
