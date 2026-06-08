@@ -1,6 +1,7 @@
 from setuptools import find_packages, setup
 
 package_name = 'irn_g01'
+share_dir = 'share/' + package_name
 
 setup(
     name=package_name,
@@ -9,10 +10,10 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/worlds', ['worlds/aruco_demo.sdf']),
-        ('share/' + package_name + '/models/aruco_marker', ['models/aruco_marker/model.config', 'models/aruco_marker/model.sdf']),
-        ('share/' + package_name + '/models/aruco_marker/materials/textures', ['models/aruco_marker/materials/textures/aruco_4x4_00.png']),
+        (share_dir, ['package.xml']),
+        (share_dir + '/worlds', ['worlds/aruco_demo.sdf']),
+        (share_dir + '/models/aruco_marker', ['models/aruco_marker/model.config', 'models/aruco_marker/model.sdf']),
+        (share_dir + '/models/aruco_marker/materials/textures', ['models/aruco_marker/materials/textures/aruco_4x4_00.png']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
