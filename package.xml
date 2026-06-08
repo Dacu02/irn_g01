@@ -3,9 +3,17 @@
 <package format="3">
   <name>irn_g01</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>ArUco marker display package for Gazebo Ignition simulation environment</description>
   <maintainer email="daddek9@gmail.com">dacu</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>gazebo-ignition</depend>
+  <depend>gazebo_ros</depend>
+  <depend>rclpy</depend>
+  <depend>ament_index_python</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
