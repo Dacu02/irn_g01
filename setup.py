@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'aruco_reader = irn_g01.aruco_reader:main',
         ],
     },
 )
