@@ -17,16 +17,13 @@ class State(Enum):
     FOLLOW = 1 
     PURSUE = 2 
 
-MAX_TRANSFORM_WAIT_TIME:int = 10  #s
 CAMERA_FRAME = "oakd_rgb_camera_frame"
-MAX_MARKER_LOST_TIME:int = 5      #s
-MAX_MARKER_LOST_FRAMES:int = 2
-LOST_CONDITION: Literal['frame', 'time', 'AND', 'OR'] = 'OR'
+MAX_TRANSFORM_WAIT_TIME:int = 10  #s
 
 TARGET_DISTANCE = 0.05
 TARGET_OFFSET = TARGET_DISTANCE / 3
 
-KP_LINEAR = 20
+KP_LINEAR = 30
 KP_ANGULAR = 35
 STOP_CMD = Twist() # comando di stop (tutti i campi a zero)
 STOP_CMD.linear.x = 0.0
@@ -192,24 +189,6 @@ class Core(Node):
         self.get_logger().debug(f'Controllo FSM - Stato attuale: {self._state.name}')
         # Se siamo in FOLLOW, verifichiamo se abbiamo perso il marker
         if self._state == State.FOLLOW:
-            time_lost = False
-            frame_lost = self._marker_lost_frames >= MAX_MARKER_LOST_FRAMES
-            
-            if self._last_seen_time is not None:
-                elapsed_time = (now - self._last_seen_time).nanoseconds / 1e9
-                time_lost = elapsed_time >= MAX_MARKER_LOST_TIME
-            
-            # Valutazione condizione di perdita
-            should_pursue = False
-            if LOST_CONDITION == 'OR' and (time_lost or frame_lost):
-                should_pursue = True
-            elif LOST_CONDITION == 'AND' and (time_lost and frame_lost):
-                should_pursue = True
-            elif LOST_CONDITION == 'time' and time_lost:
-                should_pursue = True
-            elif LOST_CONDITION == 'frame' and frame_lost:
-                should_pursue = True
-                
             if should_pursue:
                 self.get_logger().warn('Marker perso. Transizione a PURSUE.')
                 self._transition_to(State.PURSUE)
@@ -267,16 +246,16 @@ class Core(Node):
         x = self._aruco_pose_wrt_camera.pose.position.x
         z = self._aruco_pose_wrt_camera.pose.position.z
 
-        distance = z # math.hypot(x, z) # suggerimento chatgpt
+        distance = z
 
         angle = math.atan2(x, z)
-
+        q = self._aruco_pose_wrt_camera.pose.orientation
+        yaw = self._quaternion_to_yaw(q)
+        self.get_logger().info(f'Angolo marker (yaw): {math.degrees(yaw):.1f}°')
         cmd = Twist()
 
-        if distance > (TARGET_DISTANCE + TARGET_OFFSET):
-            distance_error = distance - (TARGET_DISTANCE + TARGET_OFFSET)
-        elif distance < (TARGET_DISTANCE - TARGET_OFFSET):
-            distance_error = distance - (TARGET_DISTANCE - TARGET_OFFSET)
+        if distance > (TARGET_DISTANCE + TARGET_OFFSET) or distance < (TARGET_DISTANCE - TARGET_OFFSET):
+            distance_error = distance - TARGET_DISTANCE # positivo se siamo troppo lontani, negativo se siamo troppo vicini
         else:
             distance_error = 0.0
 

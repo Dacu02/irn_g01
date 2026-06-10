@@ -1,3 +1,4 @@
+from typing import Literal
 import rclpy
 from rclpy.node import Node
 import cv2
@@ -5,51 +6,41 @@ import numpy as np
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped
+from .literals import EMPTY_MESSAGE, rvec_to_quaternion, CAMERA_FRAME
 
-# Dimensione fisica REALE del marker stampato (in metri!)
+# Marker info
 MARKER_LENGTH = 0.020  # es. 20 cm
-ARUCO_ID = 372 # ID del marker da rilevare
-EMPTY_MESSAGE = PoseStamped()
-EMPTY_MESSAGE.pose.position.x = 0.0
-EMPTY_MESSAGE.pose.position.y = 0.0
-EMPTY_MESSAGE.pose.position.z = 0.0
-EMPTY_MESSAGE.pose.orientation.x = 0.0
-EMPTY_MESSAGE.pose.orientation.y = 0.0
-EMPTY_MESSAGE.pose.orientation.z = 0.0
-EMPTY_MESSAGE.pose.orientation.w = 1.0
+ARUCO_ID = 372 # ID marker
+ARUCO_DICT = cv2.aruco.DICT_4X4_1000
 
+# Lost mechanic
+MAX_MARKER_LOST_TIME:int = 5 #s
+MAX_MARKER_LOST_FRAMES:int = 5
+LOST_CONDITION: Literal['frame', 'time', 'AND', 'OR'] = 'OR'
 
-def rvec_to_quaternion(rvec):
-    """Converte rotation vector (Rodrigues) → quaternione (x, y, z, w)."""
-    R, _ = cv2.Rodrigues(rvec)
-    trace = R[0,0] + R[1,1] + R[2,2]
-    if trace > 0:
-        s = 0.5 / np.sqrt(trace + 1.0)
-        return (R[2,1]-R[1,2])*s, (R[0,2]-R[2,0])*s, (R[1,0]-R[0,1])*s, 0.25/s
-    elif R[0,0] > R[1,1] and R[0,0] > R[2,2]:
-        s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
-        return 0.25*s, (R[0,1]+R[1,0])/s, (R[0,2]+R[2,0])/s, (R[2,1]-R[1,2])/s
-    elif R[1,1] > R[2,2]:
-        s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
-        return (R[0,1]+R[1,0])/s, 0.25*s, (R[1,2]+R[2,1])/s, (R[0,2]-R[2,0])/s
-    else:
-        s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
-        return (R[0,2]+R[2,0])/s, (R[1,2]+R[2,1])/s, 0.25*s, (R[1,0]-R[0,1])/s
-
+# Activation mechanic
+DETECT_FRAMES_THRESHOLD: int = 3 
+SHOULD_BE_CONSECUTIVE_FRAMES: bool = True
+USE_ACTIVATION_MECHANIC_WHEN_LOST: bool = True
+# Other
+ALWAYS_CHECK_CAMERA_PARAMETERS = False
 
 class ArucoReader(Node):
     def __init__(self):
         super().__init__('aruco_reader')
+
+        # CV parameters
         self.bridge = CvBridge()
-        self._aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_1000)
+        self._aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
         self._aruco_params = cv2.aruco.DetectorParameters()
         self._aruco_detector = cv2.aruco.ArucoDetector(self._aruco_dict, self._aruco_params)
 
-        # Parametri camera — popolati dal callback CameraInfo
+
+        # Camera parameters
         self._camera_matrix = None  # K  (3x3)
         self._dist_coeffs = None    # D  (1xN)
 
-        # Punti 3D del marker nel suo sistema di riferimento locale
+
         # ArUco corners: top-left, top-right, bottom-right, bottom-left
         h = MARKER_LENGTH / 2
         self._obj_points = np.array([
@@ -59,25 +50,36 @@ class ArucoReader(Node):
             [-h, -h, 0],
         ], dtype=np.float32)
 
-        self._image_subscription = self.create_subscription(
-            Image, '/oakd/rgb/preview/image_raw', self._image_callback, 10)
-        self._camera_info_subscription = self.create_subscription(
-            CameraInfo, '/oakd/rgb/preview/camera_info', self._camera_info_callback, 10)
 
-        # PoseStamped invece di Pose: include header con frame e timestamp
+        # Subscriptions
+        self._image_subscription = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self._inactive_image_callback, 10)
+        self._camera_info_subscription = self.create_subscription(CameraInfo, '/oakd/rgb/preview/camera_info', self._camera_info_callback, 10)
+
+        # Publisher
         self._pose_publisher = self.create_publisher(PoseStamped, '/aruco/pose', 10)
 
+        # State variables
+        self._timer = self.get_clock().now()
+        self._lost_frames = 0
+        self._seen_frames = 0
+        self._lost_flag = False
         self.get_logger().info('Nodo ArucoReader avviato.')
 
+
     # ------------------------------------------------------------------ #
+
     def _camera_info_callback(self, msg: CameraInfo):
         """
         Salva camera matrix e distorsione alla PRIMA ricezione.
         K è un array flat [9] → reshape (3,3)
         D è un array di lunghezza variabile (tipicamente 5 o 8 elementi)
+
+
+        Removes the subscription when parameters are received, unless ALWAYS_CHECK_CAMERA_PARAMETERS is True.
         """
         if self._camera_matrix is not None:
-            return  # già ricevuti, non serve aggiornarli ogni frame
+            if not np.array_equal(self._camera_matrix, np.array(msg.k).reshape(3, 3)):
+                self.get_logger().warn('Camera matrix cambiata! Aggiorno i parametri.')
 
         # K: [ fx,  0, cx,
         #       0, fy, cy,
@@ -92,14 +94,46 @@ class ArucoReader(Node):
             f'Distorsione: {self._dist_coeffs}'
         )
 
+        if not ALWAYS_CHECK_CAMERA_PARAMETERS:
+            self._camera_info_subscription.destroy()  
+
     # ------------------------------------------------------------------ #
+
+    def _inactive_image_callback(self, msg: Image):
+        """
+            Initial callback, used until the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
+            Counts the number of frames received and activates the real callback after the threshold is reached.
+        """
+        if self._camera_matrix is None:
+            self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
+            return
+        # Se abbiamo già attivato la lettura, non usiamo più questo callback
+        if self._activation_flag:
+            return
+        
+        self._seen_frames += 1
+        if self._seen_frames >= DETECT_FRAMES_THRESHOLD:
+            self.get_logger().info(f'Rilevati {self._seen_frames} frame, attivo la lettura marker!')
+            self._activation_flag = True
+
+            self._image_subscription.destroy() 
+            self._image_subscription = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self._image_callback, 10)
+            
+    # ------------------------------------------------------------------ #
+
     def _image_callback(self, msg: Image):
+        """
+            Active callback, used after the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
+            Detects the marker, estimates its pose, and publishes it. If the marker is lost, counts lost frames and time, and publishes EMPTY_MESSAGE if the lost condition is met.
+        """
         if self._camera_matrix is None:
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
 
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            self._timer = self.get_clock().now() 
+            self._lost_frames = 0
         except Exception as e:
             self.get_logger().error(f'Conversione immagine fallita: {e}')
             return
@@ -150,12 +184,48 @@ class ArucoReader(Node):
                 f'Marker {str(ARUCO_ID)}: x={tvec[0][0]:.3f}m  y={tvec[1][0]:.3f}m  z={tvec[2][0]:.3f}m'
             )
         else:
-            self.get_logger().info('Marker non rilevato.')
-            self._pose_publisher.publish(EMPTY_MESSAGE)
+            self.get_logger().debug('Marker non rilevato.')
+            #self._pose_publisher.publish(EMPTY_MESSAGE)
+            
+            self._lost_frames += 1
+            elapsed_time = (self.get_clock().now() - self._timer).nanoseconds  / 1e9
+            
+            lost_by_time = elapsed_time > MAX_MARKER_LOST_TIME
+            lost_by_frames = self._lost_frames > MAX_MARKER_LOST_FRAMES
 
-        cv2.imshow('ArUco Camera View', frame)
+            if LOST_CONDITION == 'time' and lost_by_time:
+                self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s (soglia {MAX_MARKER_LOST_TIME}s)')
+                self.aruco_lost()
+            elif LOST_CONDITION == 'frame' and lost_by_frames:
+                self.get_logger().warn(f'Marker perso da {self._lost_frames} frame (soglia {MAX_MARKER_LOST_FRAMES} frame)')
+                self.aruco_lost()
+            elif LOST_CONDITION == 'AND' and lost_by_time and lost_by_frames:
+                self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s e {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s e {MAX_MARKER_LOST_FRAMES} frame)')
+                self.aruco_lost()
+            elif LOST_CONDITION == 'OR' and (lost_by_time or lost_by_frames):
+                self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s o {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s o {MAX_MARKER_LOST_FRAMES} frame)')
+                self.aruco_lost()
+                cv2.imshow('ArUco Camera View', frame)
+            
         cv2.waitKey(1)
 
+    def aruco_lost(self):
+        """
+            Called when the ArUco marker is lost.
+                - Publishes EMPTY_MESSAGE to indicate loss.
+                - If USE_ACTIVATION_MECHANIC_WHEN_LOST is True, resets the activation mechanic to allow re-detection.
+        """
+        if not self._lost_flag:
+            self._pose_publisher.publish(EMPTY_MESSAGE)
+            self._lost_flag = True
+            self.get_logger().info('Marker perso: pubblicato messaggio vuoto.')
+        if USE_ACTIVATION_MECHANIC_WHEN_LOST:
+            self.get_logger().info('Riattivo meccanismo di attivazione dopo perdita marker.')
+            self._activation_flag = False
+            self._seen_frames = 0
+            self._image_subscription.destroy() 
+            self._image_subscription = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self._inactive_image_callback, 10)
+            
 
 def main(args=None):
     rclpy.init(args=args)
