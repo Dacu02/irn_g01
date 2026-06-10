@@ -316,14 +316,14 @@ class Core(Node):
 
             # Coordinate correnti in mappa
             xr = robot_pose.pose.position.x
-            zr = robot_pose.pose.position.z
+            yr = robot_pose.pose.position.y
             xm = self._last_aruco_pose_map.position.x
-            zm = self._last_aruco_pose_map.position.z
+            ym = self._last_aruco_pose_map.position.y
 
             # 3. Calcola il vettore dal robot al marker e la sua distanza reale in mappa
             dx = xm - xr
-            dz = zm - zr
-            current_map_distance = math.hypot(dx, dz)
+            dy = ym - yr
+            current_map_distance = math.hypot(dx, dy)
 
             if current_map_distance == 0.0:
                 self.get_logger().warn('Robot e Marker sono nella stessa posizione!')
@@ -333,12 +333,12 @@ class Core(Node):
             desider_pose = Pose()
             # Ci posizioniamo a TARGET_DISTANCE dal marker, lungo il vettore che unisce robot e marker
             desider_pose.position.x = xm - (TARGET_DISTANCE * (dx / current_map_distance))
-            desider_pose.position.z = zm - (TARGET_DISTANCE * (dz / current_map_distance))
+            desider_pose.position.y = ym - (TARGET_DISTANCE * (dy / current_map_distance))
             desider_pose.position.z = 0.0
 
             # 5. Calcola l'orientamento assoluto per guardare il marker in mappa
             # L'angolo della retta che unisce la nuova posa al marker è lo stesso del vettore originale
-            absolute_target_angle = math.atan2(dz, dx)
+            absolute_target_angle = math.atan2(dy, dx)
 
             desider_pose.orientation.x = 0.0
             desider_pose.orientation.y = 0.0
