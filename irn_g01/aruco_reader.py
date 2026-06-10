@@ -7,7 +7,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped
 
 # Dimensione fisica REALE del marker stampato (in metri!)
-MARKER_LENGTH = 0.20  # es. 20 cm
+MARKER_LENGTH = 0.020  # es. 20 cm
 ARUCO_ID = 372 # ID del marker da rilevare
 EMPTY_MESSAGE = PoseStamped()
 EMPTY_MESSAGE.pose.position.x = 0.0
@@ -118,7 +118,7 @@ class ArucoReader(Node):
                 self._obj_points,
                 img_points,
                 self._camera_matrix,
-                self._dist_coeffs,
+                self._dist_coeffs, # type: ignore
                 flags=cv2.SOLVEPNP_IPPE_SQUARE  # ottimale per marker quadrati
             ) # type: ignore
 
@@ -128,7 +128,7 @@ class ArucoReader(Node):
 
             # Disegna gli assi XYZ sul marker (debug visivo)
             cv2.drawFrameAxes(
-                frame, self._camera_matrix, self._dist_coeffs,
+                frame, self._camera_matrix, self._dist_coeffs, # type: ignore
                 rvec, tvec, MARKER_LENGTH * 0.5
             ) # type: ignore
 
