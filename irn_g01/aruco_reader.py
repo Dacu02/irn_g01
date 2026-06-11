@@ -9,7 +9,7 @@ from geometry_msgs.msg import PoseStamped
 from .literals import EMPTY_MESSAGE, rvec_to_quaternion, CAMERA_FRAME
 
 # Marker info
-MARKER_LENGTH = 0.20  # es. 20 cm
+MARKER_LENGTH = .2  # es. 20 cm
 ARUCO_ID = 372 # ID marker
 ARUCO_DICT = cv2.aruco.DICT_4X4_1000
 
@@ -22,16 +22,15 @@ LOST_CONDITION: Literal['frame', 'time', 'AND', 'OR'] = 'OR'
 DETECT_FRAMES_THRESHOLD: int = 3 
 SHOULD_BE_CONSECUTIVE_FRAMES: bool = True
 USE_ACTIVATION_MECHANIC_WHEN_LOST: bool = True
+
 # Other
 ALWAYS_CHECK_CAMERA_PARAMETERS = False
+SKIP_FRAME = 10 # processa solo 1 frame ogni SKIP_FRAME
 
 class ArucoReader(Node):
     def __init__(self):
         super().__init__('aruco_reader')
 
-        self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, False)])
-        self._image_topic:str = '/oakd/rgb/preview/image_raw/compressed' if not self.get_parameter('use_sim_time').value else '/camera/image_raw/compressed'
-        self._image_type:type = CompressedImage if not self.get_parameter('use_sim_time').value else Image
         # CV parameters
         self.bridge = CvBridge()
         self._aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
@@ -53,11 +52,6 @@ class ArucoReader(Node):
             [-h, -h, 0],
         ], dtype=np.float32)
 
-
-        # Subscriptions
-        self._image_subscription = self.create_subscription(self._image_type, self._image_topic, self._image_callback, 10)  #TODO metti a inactive e check distruzione callback
-        self._camera_info_subscription = self.create_subscription(CameraInfo, '/oakd/rgb/preview/camera_info', self._camera_info_callback, 10)
-
         # Publisher
         self._pose_publisher = self.create_publisher(PoseStamped, '/aruco/pose', 10)
 
@@ -67,8 +61,24 @@ class ArucoReader(Node):
         self._seen_frames = 0
         self._lost_flag = False
         self.get_logger().info('Nodo ArucoReader avviato.')
-        self._activation_flag = False
+        self._activation_flag = False # se attivare l'inseguimento dei marker
+        self._frame_count = 0
 
+
+    # ------------------------------------------------------------------ #
+
+    def set_subscriber(self, use_sim_time:bool):
+        self._image_subscription = self.create_subscription(Image if use_sim_time else CompressedImage, '/oakd/rgb/preview/image_raw' if use_sim_time else '/oakd/rgb/preview/image_raw/compressed', self._general_image_callback, 10)  #TODO metti a inactive e check distruzione callback
+        self._camera_info_subscription = self.create_subscription(CameraInfo, '/oakd/rgb/preview/camera_info', self._camera_info_callback, 10)
+
+    def _general_image_callback(self, msg:Image|CompressedImage):
+        if self._camera_matrix is None:
+            self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
+            return
+        if self._activation_flag:
+            self._image_callback(msg)  # usa il callback attivo
+        else:
+            self._inactive_image_callback(msg)  # usa il callback inattivo
 
     # ------------------------------------------------------------------ #
 
@@ -108,10 +118,14 @@ class ArucoReader(Node):
             Initial callback, used until the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
             Counts the number of frames received and activates the real callback after the threshold is reached.
         """
+        self._frame_count += 1
+        if self._frame_count < SKIP_FRAME / 2:
+            return
+
         if self._camera_matrix is None:
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
-        # Se abbiamo già attivato la lettura, non usiamo più questo callback
+        # Se abbiamo già attivato   la lettura, non usiamo più questo callback
         if self._activation_flag:
             return
         
@@ -126,9 +140,9 @@ class ArucoReader(Node):
             if self._seen_frames >= DETECT_FRAMES_THRESHOLD:
                 self.get_logger().info(f'Rilevati {self._seen_frames} frame, attivo la lettura marker!')
                 self._activation_flag = True
-
-                self._image_subscription.destroy() 
-                self._image_subscription = self.create_subscription(self._image_type, self._image_topic, self._image_callback, 10)
+                self._skip_frame_count = SKIP_FRAME - 1 # per processare subito il prossimo frame 
+                #self._image_subscription.destroy() 
+                #self._image_subscription = self.create_subscription(CompressedImage, '/oakd/rgb/preview/image_raw/compressed', self._image_callback, 10)
         elif SHOULD_BE_CONSECUTIVE_FRAMES:
             self._seen_frames = 0  # reset se vogliamo frame consecutivi
             
@@ -143,6 +157,11 @@ class ArucoReader(Node):
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
 
+        self._frame_count += 1
+        if self._frame_count < SKIP_FRAME:
+            return
+        self._frame_count = 0
+
         frame = image_to_frame(msg, self.bridge)
         if frame is None:
             self.get_logger().error("Decodifica JPEG fallita")
@@ -151,8 +170,6 @@ class ArucoReader(Node):
         try:
             self._timer = self.get_clock().now() 
             self._lost_frames = 0
-            cv2.imshow('ArUco Camera View', frame)
-            cv2.waitKey(1)
         except Exception as e:
             self.get_logger().error(f'Conversione immagine fallita: {e}')
             return
@@ -178,7 +195,7 @@ class ArucoReader(Node):
             if not ok:
                 self.get_logger().error('solvePnP ha fallito!')
                 return
-
+            cv2.imshow('ArUco Camera View', frame)
             # Disegna gli assi XYZ sul marker (debug visivo)
             cv2.drawFrameAxes(
                 frame, self._camera_matrix, self._dist_coeffs, # type: ignore
@@ -224,7 +241,6 @@ class ArucoReader(Node):
             elif LOST_CONDITION == 'OR' and (lost_by_time or lost_by_frames):
                 self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s o {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s o {MAX_MARKER_LOST_FRAMES} frame)')
                 self.aruco_lost()
-            cv2.imshow('ArUco Camera View', frame)
             
         cv2.waitKey(1)
 
@@ -242,19 +258,21 @@ class ArucoReader(Node):
             self.get_logger().info('Riattivo meccanismo di attivazione dopo perdita marker.')
             self._activation_flag = False
             self._seen_frames = 0
-            self._image_subscription.destroy() 
-            self._image_subscription = self.create_subscription(self._image_type, self._image_topic, self._inactive_image_callback, 10)
+            self._skip_frame_count = 0
+            #self._image_subscription.destroy() 
+            #self._image_subscription = self.create_subscription(CompressedImage, '/oakd/rgb/preview/image_raw/compressed', self._inactive_image_callback, 10)
             
 def image_to_frame(msg:Image|CompressedImage, bridge:CvBridge) -> np.ndarray:
-    if isinstance(msg, CompressedImage):
+    if isinstance(msg, Image):
+        return bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+    else:  # CompressedImage
         return bridge.compressed_imgmsg_to_cv2(msg)
-    else:
-        np_arr = np.frombuffer(msg.data, np.uint8)
-        return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
 def main(args=None):
     rclpy.init(args=args)
     node = ArucoReader()
+    
+    node.set_subscriber(node.get_parameter('use_sim_time').value) # type: ignore
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -1,5 +1,6 @@
 import math
 from typing import Literal
+from rclpy.parameter import Parameter
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
@@ -9,14 +10,15 @@ import tf2_ros
 from tf2_geometry_msgs import do_transform_pose
 from rclpy.action import ActionClient
 from rclpy.action.client import ClientGoalHandle
+from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from nav2_msgs.action import NavigateToPose
-from .literals import EMPTY_MESSAGE, is_aruco_pose_empty, CAMERA_FRAME, linear_angle_distances, quaternion_to_rpy, linear_angle_distances
+from .literals import EMPTY_MESSAGE, is_aruco_pose_empty, CAMERA_FRAME, move_towards_angle, quaternion_to_rpy, linear_angle_distances
 from copy import deepcopy #TODO Valutarne l'utilizzo
-MAX_TRANSFORM_WAIT_TIME:int = 10  #s
+MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
-TARGET_DISTANCE = 0.05
+TARGET_DISTANCE = 1.5
 TARGET_OFFSET = TARGET_DISTANCE / 3
-ANGLE_OFFSET = math.radians(15)
+ANGLE_OFFSET = math.radians(20)
 
 FRAME_MAX_TIME = 2 #s
 
@@ -33,10 +35,10 @@ class Follow(Node):
     def __init__(self):
         super().__init__('follow')
         self.get_logger().info('Follow Node iniziato.')
+        self._navigator = BasicNavigator()
         
         # Subscriptions
         self._aruco_listener = self.create_subscription(PoseStamped, '/aruco/pose', self._aruco_callback, 10)
-        self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         # TF2
         self._tf_buffer = tf2_ros.Buffer()
@@ -53,39 +55,36 @@ class Follow(Node):
 
     def _aruco_callback(self, msg: PoseStamped):
 
-        # TODO DEBUG --------------------------------------
-        self.get_logger().info(f'Nuova posizione ricevuta {msg.pose}')
+
+        if is_aruco_pose_empty(msg):
+            self.get_logger().info('Marker perso: messaggio vuoto ricevuto.')
+            self._last_aruco_map_pose = None
+            return
+        
         try:
             map_pose = self._transform_marker_pose_to_map(msg.pose)
         except TransformException as e:
             self.get_logger().error(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
             return
         self.get_logger().info(f'Posizione del marker in mappa: {map_pose}')
-        return
-        # TODO DEBUG ---------------------------------
-    
-
-        if is_aruco_pose_empty(msg):
-            self.get_logger().info('Marker perso: messaggio vuoto ricevuto.')
-            self._last_aruco_map_pose = None
-            # TODO fermare il robot e lasciar lavorare PURSUE.PY fino a nuovo marker
-            return
-
-        try:
-            map_pose = self._transform_marker_pose_to_map(msg.pose)
-        except TransformException as e:
-            self.get_logger().error(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
-            return
 
         if self._last_aruco_map_pose is not None:
+            self.get_logger().info('Marker già visto in precedenza, confronto con la posizione precedente.')
             linear_distance, angle_distance = linear_angle_distances(self._last_aruco_map_pose, msg.pose)
             if linear_distance > TARGET_DISTANCE:
                 self.get_logger().info('Nuova posizione marker in mappa: distanza dal target sufficiente, invio nuovo goal.')
-                self._reach_goal(map_pose)
+                _, _, angle = quaternion_to_rpy(map_pose.orientation)
+                self.get_logger().info(f'Angolo del marker: {math.degrees(angle)}')
+                self.get_logger().info(f'Movimento verso il marker, distanza lineare: {linear_distance}, distanza angolare: {math.degrees(angle_distance)}')
+                front_pose = move_towards_angle(map_pose, TARGET_DISTANCE, -angle)
+                self._reach_goal(front_pose)
                 
             elif angle_distance > ANGLE_OFFSET:
-                self.get_logger().info('Nuova posizione marker vicina ma con angolo distante, invio rotazione')
+                self.get_logger().info(f'Rotazione verso il marker, distanza angolare: {math.degrees(angle_distance)}')
                 self._reach_rotation_goal(map_pose.orientation)
+        else:
+            self.get_logger().info('Prima volta che vedo il marker, invio goal alla posizione attuale del marker.')
+            self._reach_goal(map_pose)
 
         self._last_aruco_map_pose = map_pose
         self.get_logger().info(f'Nuova posizione ricevuta {msg.pose}')
@@ -142,52 +141,36 @@ class Follow(Node):
         new_goal_pose.position = self._goal_pose.position
         new_goal_pose.orientation = target_quaternion
         return self._reach_goal(new_goal_pose)
-        
-    def _goal_response_callback(self, future):
-        """Risposta dall'invio del goal al nodo di nav2"""
-        goal_handle: ClientGoalHandle = future.result()
-
-        if not goal_handle.accepted:
-            self.get_logger().info('Goal rifiutato dal server Nav2')
-            self._goal_handle = None
-            return
-        
-        self.get_logger().info('Goal accettato dal server Nav2')
-        self._goal_handle = goal_handle
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self._goal_result_callback)
-
-    def _goal_result_callback(self, result):
-        """Chiamato quando Nav2 completa (o fallisce) il goal."""
-        self.get_logger().info('Goal Nav2 completato.')
-        self._goal_handle = None
-        self._goal_position = None
 
     def _reach_goal(self, target_pose: Pose) -> bool:
         """
-            Funzinone per inviare un goal
+            Funzione per inviare un goal
         """
-        if not self._action_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error('Action server navigate_to_pose non disponibile!')
-            return False
 
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose = PoseStamped()
-        goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose = Pose()
-        goal_msg.pose.pose.position = target_pose.position
-        goal_msg.pose.pose.orientation = target_pose.orientation
+        goal_msg = PoseStamped()
+        goal_msg.header.frame_id = 'map'
+        goal_msg.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose = Pose()
+        goal_msg.pose.position = target_pose.position
+        goal_msg.pose.orientation = target_pose.orientation
+        if self._goal_pose is not None:
+            linear_distance, angle_distance = linear_angle_distances(self._goal_pose, target_pose)
+            if linear_distance < TARGET_OFFSET and angle_distance < ANGLE_OFFSET:
+                self.get_logger().info('Già abbastanza vicino al goal.')
+                return True
+        self._goal_pose = target_pose
+        return navigate_to_pose(self._navigator, goal_msg)
 
-        self._goal_position = goal_msg.pose.pose
-        future = self._action_client.send_goal_async(goal_msg)
-        future.add_done_callback(self._goal_response_callback)
-        self.get_logger().info(f'Goal inviato al Nav2: ({target_pose})')
-        return True
+def navigate_to_pose(navigator: BasicNavigator, pose: PoseStamped) -> bool:
+    navigator.get_logger().info(f"Navigating to {pose}")
+    return navigator.goToPose(pose)
+
 
 def main(args=None):
     rclpy.init(args=args)
+    param = rclpy.Parameter("use_sim_time", rclpy.Parameter.Type.BOOL, False)
     node = Follow()
+    node.set_parameters([param])
     try:
         rclpy.spin(node)
     finally:

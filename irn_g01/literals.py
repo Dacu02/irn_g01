@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from geometry_msgs.msg import Pose, PoseStamped, Quaternion
 from nav2_msgs.action import NavigateToPose
+from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 EMPTY_MESSAGE = PoseStamped()
 EMPTY_MESSAGE.pose.position.x = 0.0
 EMPTY_MESSAGE.pose.position.y = 0.0
@@ -90,5 +91,5 @@ def move_towards_angle(pose:Pose, range: float, angle: float) -> Pose:
     new_pose.position.x = pose.position.x + range * math.cos(angle)
     new_pose.position.y = pose.position.y + range * math.sin(angle)
     new_pose.position.z = pose.position.z
-    
+    new_pose.orientation = pose.orientation
     return new_pose
