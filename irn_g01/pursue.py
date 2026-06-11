@@ -4,9 +4,9 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from .literals import EMPTY_MESSAGE, is_aruco_pose_empty
-
+BUFFER_SIZE = 10
 class Positions:
-    def __init__(self, max_size: int = 10):
+    def __init__(self, max_size: int = BUFFER_SIZE):
         self._poses: list[PoseStamped] = []
         self._size = 0
         self._max_size = max_size
@@ -38,15 +38,26 @@ class Pursue(Node):
     def __init__(self):
         super().__init__('pursue')
         self._pose_subscription = self.create_subscription(PoseStamped, '/aruco/pose', self.pose_callback, 10)
-        self._last_marker_poses = Positions(max_size=10)
+        self._last_marker_poses = Positions(max_size=BUFFER_SIZE)
 
     def pose_callback(self, msg: PoseStamped):
         if is_aruco_pose_empty(msg):
-            self.get_logger().info('Marker perso: messaggio vuoto ricevuto.')
+            self.get_logger().info('Marker perso: pursue lanciato.')
             self._last_marker_poses.clear()
             return
         
         self._last_marker_poses.add_pose(msg)
+
+        # TODO Calcola kalmann
+        # TODO Raggiungi la posizione stimata
+        # TODO In caso non venga rilevato il marker una volta raggiunta la posizione entro un dato limite, lancia la lost_fallback
+
+    def lost_fallback(self):
+        # TODO implementare comportamento di fallback quando il marker è perso
+        # ad esempio, inseguire l'ultima posizione nota del marker o eseguire una ricerca
+        pass
+
+
 
 def main(args=None):
 	rclpy.init(args=args)

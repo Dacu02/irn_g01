@@ -41,10 +41,30 @@ def generate_launch_description():
         }]
     )
     
-    core = Node(
+    roam_node = Node(
         package='irn_g01',
-        executable='core',
-        name='core',
+        executable='roam',
+        name='roam',
+        output='screen',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time')
+        }]
+    )
+
+    follow_node = Node(
+        package='irn_g01',
+        executable='follow',
+        name='follow',
+        output='screen',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time')
+        }]
+    )
+
+    pursue_node = Node(
+        package='irn_g01',
+        executable='pursue',
+        name='pursue',
         output='screen',
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time')
@@ -61,4 +81,6 @@ def generate_launch_description():
     ld.add_action(turtlebot4_launch)
     ld.add_action(moving_aruco_launch)
     ld.add_action(aruco_reader_node)
-    ld.add_action(core)
+    ld.add_action(roam_node)
+    ld.add_action(follow_node)
+    ld.add_action(pursue_node)
