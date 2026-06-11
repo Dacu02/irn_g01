@@ -136,6 +136,7 @@ class ArucoReader(Node):
 
         corners, ids, _ = self._aruco_detector.detectMarkers(frame)
         if ids is not None and len(ids) > 0 and ARUCO_ID in ids:
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
             self._seen_frames += 1
             if self._seen_frames >= DETECT_FRAMES_THRESHOLD:
                 self.get_logger().info(f'Rilevati {self._seen_frames} frame, attivo la lettura marker!')
@@ -145,6 +146,10 @@ class ArucoReader(Node):
                 #self._image_subscription = self.create_subscription(CompressedImage, '/oakd/rgb/preview/image_raw/compressed', self._image_callback, 10)
         elif SHOULD_BE_CONSECUTIVE_FRAMES:
             self._seen_frames = 0  # reset se vogliamo frame consecutivi
+
+        cv2.imshow('ArUco Camera View', frame)
+        cv2.waitKey(1)
+
             
     # ------------------------------------------------------------------ #
 
@@ -195,12 +200,11 @@ class ArucoReader(Node):
             if not ok:
                 self.get_logger().error('solvePnP ha fallito!')
                 return
-            cv2.imshow('ArUco Camera View', frame)
-            # Disegna gli assi XYZ sul marker (debug visivo)
-            cv2.drawFrameAxes(
-                frame, self._camera_matrix, self._dist_coeffs, # type: ignore
-                rvec, tvec, MARKER_LENGTH * 0.5
-            ) # type: ignore
+            
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)   # contorno verde + ID
+            if self._dist_coeffs is None:
+                raise ValueError("Distortion coefficients are not available")
+            cv2.drawFrameAxes(frame, self._camera_matrix, self._dist_coeffs, rvec, tvec, MARKER_LENGTH * 0.5)
 
             # tvec → posizione [m] nel frame camera
             # rvec → orientamento (Rodrigues) → quaternione
@@ -242,6 +246,7 @@ class ArucoReader(Node):
                 self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s o {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s o {MAX_MARKER_LOST_FRAMES} frame)')
                 self.aruco_lost()
             
+        cv2.imshow('ArUco Camera View', frame)
         cv2.waitKey(1)
 
     def aruco_lost(self):
