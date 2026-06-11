@@ -12,7 +12,7 @@ EMPTY_MESSAGE.pose.orientation.x = 0.0
 EMPTY_MESSAGE.pose.orientation.y = 0.0
 EMPTY_MESSAGE.pose.orientation.z = 0.0
 EMPTY_MESSAGE.pose.orientation.w = 1.0
-CAMERA_FRAME = "oakd_rgb_camera_frame"
+CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
 
 
 def is_aruco_pose_empty(msg:PoseStamped) -> bool:
@@ -46,7 +46,6 @@ def quaternion_to_rpy(q:Quaternion) -> tuple[float, float, float]:
     Converte un quaternione (x, y, z, w)
     in roll, pitch, yaw (radianti).
     """
-    return q.x, q.y, q.z
     # Roll (X)
     sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z)
     cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y)

@@ -1,15 +1,15 @@
 from typing import Literal
 import rclpy
-from rclpy.node import Node
+from rclpy.node import Node, Parameter
 import cv2
 import numpy as np
 from cv_bridge import CvBridge
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CameraInfo, CompressedImage
 from geometry_msgs.msg import PoseStamped
 from .literals import EMPTY_MESSAGE, rvec_to_quaternion, CAMERA_FRAME
 
 # Marker info
-MARKER_LENGTH = 0.020  # es. 20 cm
+MARKER_LENGTH = 0.20  # es. 20 cm
 ARUCO_ID = 372 # ID marker
 ARUCO_DICT = cv2.aruco.DICT_4X4_1000
 
@@ -29,6 +29,9 @@ class ArucoReader(Node):
     def __init__(self):
         super().__init__('aruco_reader')
 
+        self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, False)])
+        self._image_topic:str = '/oakd/rgb/preview/image_raw/compressed' if not self.get_parameter('use_sim_time').value else '/camera/image_raw/compressed'
+        self._image_type:type = CompressedImage if not self.get_parameter('use_sim_time').value else Image
         # CV parameters
         self.bridge = CvBridge()
         self._aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
@@ -52,7 +55,7 @@ class ArucoReader(Node):
 
 
         # Subscriptions
-        self._image_subscription = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self._inactive_image_callback, 10)
+        self._image_subscription = self.create_subscription(self._image_type, self._image_topic, self._image_callback, 10)  #TODO metti a inactive e check distruzione callback
         self._camera_info_subscription = self.create_subscription(CameraInfo, '/oakd/rgb/preview/camera_info', self._camera_info_callback, 10)
 
         # Publisher
@@ -64,6 +67,7 @@ class ArucoReader(Node):
         self._seen_frames = 0
         self._lost_flag = False
         self.get_logger().info('Nodo ArucoReader avviato.')
+        self._activation_flag = False
 
 
     # ------------------------------------------------------------------ #
@@ -99,7 +103,7 @@ class ArucoReader(Node):
 
     # ------------------------------------------------------------------ #
 
-    def _inactive_image_callback(self, msg: Image):
+    def _inactive_image_callback(self, msg: CompressedImage|Image):
         """
             Initial callback, used until the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
             Counts the number of frames received and activates the real callback after the threshold is reached.
@@ -111,17 +115,26 @@ class ArucoReader(Node):
         if self._activation_flag:
             return
         
-        self._seen_frames += 1
-        if self._seen_frames >= DETECT_FRAMES_THRESHOLD:
-            self.get_logger().info(f'Rilevati {self._seen_frames} frame, attivo la lettura marker!')
-            self._activation_flag = True
+        frame = image_to_frame(msg, self.bridge)
+        if frame is None:
+            self.get_logger().error("Decodifica JPEG fallita")
+            return
 
-            self._image_subscription.destroy() 
-            self._image_subscription = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self._image_callback, 10)
+        corners, ids, _ = self._aruco_detector.detectMarkers(frame)
+        if ids is not None and len(ids) > 0 and ARUCO_ID in ids:
+            self._seen_frames += 1
+            if self._seen_frames >= DETECT_FRAMES_THRESHOLD:
+                self.get_logger().info(f'Rilevati {self._seen_frames} frame, attivo la lettura marker!')
+                self._activation_flag = True
+
+                self._image_subscription.destroy() 
+                self._image_subscription = self.create_subscription(self._image_type, self._image_topic, self._image_callback, 10)
+        elif SHOULD_BE_CONSECUTIVE_FRAMES:
+            self._seen_frames = 0  # reset se vogliamo frame consecutivi
             
     # ------------------------------------------------------------------ #
 
-    def _image_callback(self, msg: Image):
+    def _image_callback(self, msg: CompressedImage|Image):
         """
             Active callback, used after the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
             Detects the marker, estimates its pose, and publishes it. If the marker is lost, counts lost frames and time, and publishes EMPTY_MESSAGE if the lost condition is met.
@@ -130,10 +143,16 @@ class ArucoReader(Node):
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
 
+        frame = image_to_frame(msg, self.bridge)
+        if frame is None:
+            self.get_logger().error("Decodifica JPEG fallita")
+            return
+
         try:
-            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             self._timer = self.get_clock().now() 
             self._lost_frames = 0
+            cv2.imshow('ArUco Camera View', frame)
+            cv2.waitKey(1)
         except Exception as e:
             self.get_logger().error(f'Conversione immagine fallita: {e}')
             return
@@ -205,7 +224,7 @@ class ArucoReader(Node):
             elif LOST_CONDITION == 'OR' and (lost_by_time or lost_by_frames):
                 self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s o {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s o {MAX_MARKER_LOST_FRAMES} frame)')
                 self.aruco_lost()
-                cv2.imshow('ArUco Camera View', frame)
+            cv2.imshow('ArUco Camera View', frame)
             
         cv2.waitKey(1)
 
@@ -224,8 +243,14 @@ class ArucoReader(Node):
             self._activation_flag = False
             self._seen_frames = 0
             self._image_subscription.destroy() 
-            self._image_subscription = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self._inactive_image_callback, 10)
+            self._image_subscription = self.create_subscription(self._image_type, self._image_topic, self._inactive_image_callback, 10)
             
+def image_to_frame(msg:Image|CompressedImage, bridge:CvBridge) -> np.ndarray:
+    if isinstance(msg, CompressedImage):
+        return bridge.compressed_imgmsg_to_cv2(msg)
+    else:
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
 def main(args=None):
     rclpy.init(args=args)

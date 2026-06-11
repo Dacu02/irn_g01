@@ -20,6 +20,10 @@ ANGLE_OFFSET = math.radians(15)
 
 FRAME_MAX_TIME = 2 #s
 
+class TransformException(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+
 class Follow(Node):
 
     # ========================================================== #
@@ -49,12 +53,17 @@ class Follow(Node):
 
     def _aruco_callback(self, msg: PoseStamped):
 
-        # TODO DEBUG
+        # TODO DEBUG --------------------------------------
         self.get_logger().info(f'Nuova posizione ricevuta {msg.pose}')
-        map_pose = self._transform_marker_pose_to_map(msg.pose)
+        try:
+            map_pose = self._transform_marker_pose_to_map(msg.pose)
+        except TransformException as e:
+            self.get_logger().error(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
+            return
         self.get_logger().info(f'Posizione del marker in mappa: {map_pose}')
-        # TODO DEBUG
-
+        return
+        # TODO DEBUG ---------------------------------
+    
 
         if is_aruco_pose_empty(msg):
             self.get_logger().info('Marker perso: messaggio vuoto ricevuto.')
@@ -62,7 +71,11 @@ class Follow(Node):
             # TODO fermare il robot e lasciar lavorare PURSUE.PY fino a nuovo marker
             return
 
-        map_pose = self._transform_marker_pose_to_map(msg.pose)
+        try:
+            map_pose = self._transform_marker_pose_to_map(msg.pose)
+        except TransformException as e:
+            self.get_logger().error(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
+            return
 
         if self._last_aruco_map_pose is not None:
             linear_distance, angle_distance = linear_angle_distances(self._last_aruco_map_pose, msg.pose)
@@ -89,9 +102,9 @@ class Follow(Node):
 
         except Exception as e:
             self.get_logger().warn(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
-            raise e
+            raise TransformException(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
         self.get_logger().error('Transform map -> camera non disponibile, impossibile trasformare la posa del marker in mappa!')
-        raise RuntimeError('Transform map -> camera non disponibile, impossibile trasformare la posa del marker in mappa!')
+        raise TransformException('Transform map -> camera non disponibile, impossibile trasformare la posa del marker in mappa!')
     
     def get_position(self) -> Pose:
         """
