@@ -46,7 +46,7 @@ def quaternion_to_rpy(q:Quaternion) -> tuple[float, float, float]:
     Converte un quaternione (x, y, z, w)
     in roll, pitch, yaw (radianti).
     """
-
+    return q.x, q.y, q.z
     # Roll (X)
     sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z)
     cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y)

@@ -1,5 +1,4 @@
 import math
-from typing import Literal
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
@@ -325,7 +324,7 @@ class Core(Node):
             desider_pose.orientation.w = math.cos(absolute_target_angle / 2.0)
 
             self.get_logger().info(f'Navigazione verso posa calcolata: ({desider_pose.position.x:.2f}, {desider_pose.position.y:.2f})')
-            if not self._reach_goal(desider_pose):
+            if not self.reach_goal(desider_pose):
                 self.get_logger().error('Impossibile inviare il goal a Nav2!')
                 return
             

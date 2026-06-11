@@ -48,6 +48,14 @@ class Follow(Node):
     # ========================================================== #
 
     def _aruco_callback(self, msg: PoseStamped):
+
+        # TODO DEBUG
+        self.get_logger().info(f'Nuova posizione ricevuta {msg.pose}')
+        map_pose = self._transform_marker_pose_to_map(msg.pose)
+        self.get_logger().info(f'Posizione del marker in mappa: {map_pose}')
+        # TODO DEBUG
+
+
         if is_aruco_pose_empty(msg):
             self.get_logger().info('Marker perso: messaggio vuoto ricevuto.')
             self._last_aruco_map_pose = None
@@ -115,12 +123,12 @@ class Follow(Node):
         # If a pose is already present, only change angle
         if self._goal_pose is None:
             new_goal_pose = self.get_position()
-            return self.reach_goal(new_goal_pose
+            return self._reach_goal(new_goal_pose)
 
         new_goal_pose = Pose()
         new_goal_pose.position = self._goal_pose.position
         new_goal_pose.orientation = target_quaternion
-        return self.reach_goal(new_goal_pose
+        return self._reach_goal(new_goal_pose)
         
     def _goal_response_callback(self, future):
         """Risposta dall'invio del goal al nodo di nav2"""
@@ -142,7 +150,7 @@ class Follow(Node):
         self._goal_handle = None
         self._goal_position = None
 
-    def _reach_goal(self, target_pose: Pose, _goal_response_callback: function) -> bool:
+    def _reach_goal(self, target_pose: Pose) -> bool:
         """
             Funzinone per inviare un goal
         """
@@ -160,7 +168,7 @@ class Follow(Node):
 
         self._goal_position = goal_msg.pose.pose
         future = self._action_client.send_goal_async(goal_msg)
-        future.add_done_callback(_goal_response_callback)
+        future.add_done_callback(self._goal_response_callback)
         self.get_logger().info(f'Goal inviato al Nav2: ({target_pose})')
         return True
 

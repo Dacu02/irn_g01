@@ -14,7 +14,7 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='dacu',
-    maintainer_email='daddek9@gmail.com',
+    maintainer_email='daddek9@gmail.com',   
     description='TODO: Package description',
     license='TODO: License declaration',
     extras_require={
@@ -25,7 +25,9 @@ setup(
     entry_points={
         'console_scripts': [
             'aruco_reader = irn_g01.aruco_reader:main',
-            'core = irn_g01.core:main',
+            'roam = irn_g01.roam:main',
+            'follow = irn_g01.follow:main',
+            'pursue = irn_g01.pursue:main'
         ],
     },
 )
