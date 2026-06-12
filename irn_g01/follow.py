@@ -27,8 +27,7 @@ class Follow(Node):
     # ========================================================== #
 
     def __init__(self):
-        super().__init__('follow')
-        self.declare_parameter('use_sim_time', False)
+        super().__init__('follow')  
         self.get_logger().info('Follow Node iniziato.')
         self._navigator = BasicNavigator()
         
