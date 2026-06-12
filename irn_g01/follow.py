@@ -1,22 +1,16 @@
 import math
-from typing import Literal
-from rclpy.parameter import Parameter
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
 from rclpy.duration import Duration
-from geometry_msgs.msg import PoseStamped, Quaternion, Twist, Twist, Pose, TransformStamped, Transform
+from geometry_msgs.msg import PoseStamped, Quaternion, Twist, Pose, TransformStamped, Transform
 import tf2_ros
 from tf2_geometry_msgs import do_transform_pose
-from rclpy.action import ActionClient
-from rclpy.action.client import ClientGoalHandle
-from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
-from nav2_msgs.action import NavigateToPose
+from nav2_simple_commander.robot_navigator import BasicNavigator
 from .literals import EMPTY_MESSAGE, is_aruco_pose_empty, CAMERA_FRAME, move_towards_angle, quaternion_to_rpy, linear_angle_distances
-from copy import deepcopy #TODO Valutarne l'utilizzo
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
-TARGET_DISTANCE = 1.5
+TARGET_DISTANCE = 1
 TARGET_OFFSET = TARGET_DISTANCE / 3
 ANGLE_OFFSET = math.radians(20)
 
@@ -54,8 +48,6 @@ class Follow(Node):
     # ========================================================== #
 
     def _aruco_callback(self, msg: PoseStamped):
-
-
         if is_aruco_pose_empty(msg):
             self.get_logger().info('Marker perso: messaggio vuoto ricevuto.')
             self._last_aruco_map_pose = None
@@ -66,17 +58,25 @@ class Follow(Node):
         except TransformException as e:
             self.get_logger().error(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
             return
-        self.get_logger().info(f'Posizione del marker in mappa: {map_pose}')
+        self.get_logger().debug(f'Posizione del marker in mappa: {map_pose}')
 
+        # Compares turtlebot4 position with respect to the marker
+        linear_distance, angle_distance = linear_angle_distances(self.get_position(), map_pose)
+        if linear_distance < TARGET_DISTANCE and angle_distance < ANGLE_OFFSET:
+            self.get_logger().info('Marker troppo vicino o già ben orientato, non invio nuovi goal.')
+            self._last_aruco_map_pose = map_pose
+            return
+
+        # Compares last marker position with the new one when available
         if self._last_aruco_map_pose is not None:
-            self.get_logger().info('Marker già visto in precedenza, confronto con la posizione precedente.')
             linear_distance, angle_distance = linear_angle_distances(self._last_aruco_map_pose, msg.pose)
-            if linear_distance > TARGET_DISTANCE:
+            if linear_distance > TARGET_OFFSET:
                 self.get_logger().info('Nuova posizione marker in mappa: distanza dal target sufficiente, invio nuovo goal.')
                 _, _, angle = quaternion_to_rpy(map_pose.orientation)
                 self.get_logger().info(f'Angolo del marker: {math.degrees(angle)}')
                 self.get_logger().info(f'Movimento verso il marker, distanza lineare: {linear_distance}, distanza angolare: {math.degrees(angle_distance)}')
-                front_pose = move_towards_angle(map_pose, TARGET_DISTANCE, -angle)
+                #front_pose = move_towards_angle(map_pose, TARGET_DISTANCE, angle)
+                front_pose = self._compute_front_pose(map_pose, TARGET_DISTANCE)
                 self._reach_goal(front_pose)
                 
             elif angle_distance > ANGLE_OFFSET:
@@ -92,6 +92,7 @@ class Follow(Node):
     # ========================================================== #
     #                       Utility                              #
     # ========================================================== #
+    
     def _transform_marker_pose_to_map(self, marker_pose: Pose) -> Pose:
         """Transforms the marker pose from CAMERA_FRAME to map frame using TF."""
         try:
@@ -126,6 +127,47 @@ class Follow(Node):
             self.get_logger().error(f'Errore TF: {str(e)}')
             raise RuntimeError('Impossibile ottenere la posizione del robot')
         
+    def _compute_front_pose(self, marker_map_pose: Pose, distance: float) -> Pose:
+        """
+        Calcola la posa davanti al marker lungo il suo asse Z nel frame mappa.
+        Il robot viene orientato a guardare il marker.
+        
+        L'asse Z del marker ArUco punta verso la telecamera (robot),
+        quindi il target è: marker_pos + Z_marker_in_mappa * distance.
+        """
+        q = marker_map_pose.orientation
+
+        # Colonna 2 della matrice di rotazione da quaternione → asse Z del marker in mappa
+        # R * [0,0,1] = [2(qx*qz + qw*qy),  2(qy*qz - qw*qx),  1-2(qx²+qy²)]
+        fwd_x = 2.0 * (q.x * q.z + q.w * q.y)
+        fwd_y = 2.0 * (q.y * q.z - q.w * q.x)
+
+        # Proietta sul piano XY e normalizza
+        norm = math.hypot(fwd_x, fwd_y)
+        if norm > 1e-6:
+            fwd_x /= norm
+            fwd_y /= norm
+        else:
+            self.get_logger().warn('Asse Z del marker quasi verticale, direzione incerta.')
+
+        front = Pose()
+        front.position.x = marker_map_pose.position.x + fwd_x * distance
+        front.position.y = marker_map_pose.position.y + fwd_y * distance
+        front.position.z = 0.0
+
+        # Orientamento: il robot deve guardare VERSO il marker (direzione opposta a fwd)
+        yaw = math.atan2(-fwd_y, -fwd_x)
+        front.orientation.x = 0.0
+        front.orientation.y = 0.0
+        front.orientation.z = math.sin(yaw / 2.0)
+        front.orientation.w = math.cos(yaw / 2.0)
+
+        self.get_logger().info(
+            f'Front pose: ({front.position.x:.2f}, {front.position.y:.2f}) '
+            f'fwd=({fwd_x:.2f},{fwd_y:.2f}) yaw={math.degrees(yaw):.1f}°'
+        )
+        return front
+
     # ========================================================== #
     #                       Navigation                           #
     # ========================================================== #
@@ -143,10 +185,7 @@ class Follow(Node):
         return self._reach_goal(new_goal_pose)
 
     def _reach_goal(self, target_pose: Pose) -> bool:
-        """
-            Funzione per inviare un goal
-        """
-
+        """Funzione per inviare un goal"""
         goal_msg = PoseStamped()
         goal_msg.header.frame_id = 'map'
         goal_msg.header.stamp = self.get_clock().now().to_msg()
@@ -158,6 +197,10 @@ class Follow(Node):
             if linear_distance < TARGET_OFFSET and angle_distance < ANGLE_OFFSET:
                 self.get_logger().info('Già abbastanza vicino al goal.')
                 return True
+            else:
+                self.get_logger().info(f'Nuovo goal molto distante dal precedente, invio nuovo goal')
+                self._navigator.cancelTask()
+
         self._goal_pose = target_pose
         return navigate_to_pose(self._navigator, goal_msg)
 
@@ -179,4 +222,4 @@ def main(args=None):
             rclpy.shutdown()
 
 if __name__ == '__main__':
-    main()      
+    main()

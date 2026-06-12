@@ -66,6 +66,9 @@ def quaternion_to_rpy(q:Quaternion) -> tuple[float, float, float]:
 
     return roll, pitch, yaw
 
+def yaw_to_quaternion(yaw) -> tuple[float, float, float, float]:
+    return 0.0, 0.0, math.sin(yaw * 0.5), math.cos(yaw * 0.5)
+
 def linear_angle_distances(old_pose: Pose, new_pose: Pose) -> tuple[float, float]:
         """
             Determines the linear and angular distances $[-pi, pi]$ between two poses.
@@ -79,17 +82,25 @@ def linear_angle_distances(old_pose: Pose, new_pose: Pose) -> tuple[float, float
         angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi # normalizza a [-pi, pi]
         return distance, angle_diff
 
-def move_towards_angle(pose:Pose, range: float, angle: float) -> Pose:
+def move_towards_angle(pose: Pose, range: float) -> Pose:
     """
         Moves the pose towards a certain direction of range
         Args:
             - pose (Pose) : The pose to change
             - range (float) : The range of movement
-            - angle (float)  : The angle (axis x is 0, axis y is pi/2) from [-pi, pi]
     """
-    new_pose = Pose()
-    new_pose.position.x = pose.position.x + range * math.cos(angle)
-    new_pose.position.y = pose.position.y + range * math.sin(angle)
-    new_pose.position.z = pose.position.z
-    new_pose.orientation = pose.orientation
-    return new_pose
+    
+    q = pose.orientation
+    _, _, yaw = quaternion_to_rpy(q)
+    fwd_x = math.cos(yaw)
+    fwd_y = math.sin(yaw)
+
+    front = Pose()
+    front.position.x = pose.position.x + fwd_x * range
+    front.position.y = pose.position.y + fwd_y * range
+    front.position.z = 0.0
+
+    # Orientamento: il robot deve guardare VERSO il marker (direzione opposta a fwd)
+    yaw = math.atan2(-fwd_y, -fwd_x)
+    front.orientation.x, front.orientation.y, front.orientation.z, front.orientation.w = yaw_to_quaternion(yaw)
+    return front
