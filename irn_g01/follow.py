@@ -3,11 +3,11 @@ import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
 from rclpy.duration import Duration
-from geometry_msgs.msg import PoseStamped, Quaternion, Twist, Pose, TransformStamped, Transform
+from geometry_msgs.msg import PoseStamped, Quaternion, Pose
 import tf2_ros
 from tf2_geometry_msgs import do_transform_pose
 from nav2_simple_commander.robot_navigator import BasicNavigator
-from .literals import EMPTY_MESSAGE, is_aruco_pose_empty, CAMERA_FRAME, move_towards_angle, quaternion_to_rpy, linear_angle_distances
+from .literals import is_aruco_pose_empty, CAMERA_FRAME, quaternion_to_rpy, linear_angle_distances
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
 TARGET_DISTANCE = 1
@@ -28,6 +28,7 @@ class Follow(Node):
 
     def __init__(self):
         super().__init__('follow')
+        self.declare_parameter('use_sim_time', False)
         self.get_logger().info('Follow Node iniziato.')
         self._navigator = BasicNavigator()
         
@@ -54,7 +55,7 @@ class Follow(Node):
             return
         
         try:
-            map_pose = self._transform_marker_pose_to_map(msg.pose)
+            map_pose = self._transform_marker_pose_to_map(msg)
         except TransformException as e:
             self.get_logger().error(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
             return
@@ -62,14 +63,14 @@ class Follow(Node):
 
         # Compares turtlebot4 position with respect to the marker
         linear_distance, angle_distance = linear_angle_distances(self.get_position(), map_pose)
-        if linear_distance < TARGET_DISTANCE and angle_distance < ANGLE_OFFSET:
+        if linear_distance < TARGET_DISTANCE and abs(angle_distance) < ANGLE_OFFSET:
             self.get_logger().info('Marker troppo vicino o già ben orientato, non invio nuovi goal.')
             self._last_aruco_map_pose = map_pose
             return
 
         # Compares last marker position with the new one when available
         if self._last_aruco_map_pose is not None:
-            linear_distance, angle_distance = linear_angle_distances(self._last_aruco_map_pose, msg.pose)
+            linear_distance, angle_distance = linear_angle_distances(self._last_aruco_map_pose, map_pose)
             if linear_distance > TARGET_OFFSET:
                 self.get_logger().info('Nuova posizione marker in mappa: distanza dal target sufficiente, invio nuovo goal.')
                 _, _, angle = quaternion_to_rpy(map_pose.orientation)
@@ -79,7 +80,7 @@ class Follow(Node):
                 front_pose = self._compute_front_pose(map_pose, TARGET_DISTANCE)
                 self._reach_goal(front_pose)
                 
-            elif angle_distance > ANGLE_OFFSET:
+            elif abs(angle_distance) > ANGLE_OFFSET:
                 self.get_logger().info(f'Rotazione verso il marker, distanza angolare: {math.degrees(angle_distance)}')
                 self._reach_rotation_goal(map_pose.orientation)
         else:
@@ -93,18 +94,19 @@ class Follow(Node):
     #                       Utility                              #
     # ========================================================== #
     
-    def _transform_marker_pose_to_map(self, marker_pose: Pose) -> Pose:
+    def _transform_marker_pose_to_map(self, marker_pose: PoseStamped) -> Pose:
         """Transforms the marker pose from CAMERA_FRAME to map frame using TF."""
+        source_frame = marker_pose.header.frame_id or CAMERA_FRAME
         try:
-            if self._tf_buffer.can_transform('map', CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME)):
-                tf = self._tf_buffer.lookup_transform("map", CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
-                return do_transform_pose(marker_pose, tf)
+            if self._tf_buffer.can_transform('map', source_frame, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME)):
+                tf = self._tf_buffer.lookup_transform("map", source_frame, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
+                return do_transform_pose(marker_pose.pose, tf)
 
         except Exception as e:
             self.get_logger().warn(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
             raise TransformException(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
-        self.get_logger().error('Transform map -> camera non disponibile, impossibile trasformare la posa del marker in mappa!')
-        raise TransformException('Transform map -> camera non disponibile, impossibile trasformare la posa del marker in mappa!')
+        self.get_logger().error(f'Transform map -> {source_frame} non disponibile, impossibile trasformare la posa del marker in mappa!')
+        raise TransformException(f'Transform map -> {source_frame} non disponibile, impossibile trasformare la posa del marker in mappa!')
     
     def get_position(self) -> Pose:
         """
@@ -194,7 +196,7 @@ class Follow(Node):
         goal_msg.pose.orientation = target_pose.orientation
         if self._goal_pose is not None:
             linear_distance, angle_distance = linear_angle_distances(self._goal_pose, target_pose)
-            if linear_distance < TARGET_OFFSET and angle_distance < ANGLE_OFFSET:
+            if linear_distance < TARGET_OFFSET and abs(angle_distance) < ANGLE_OFFSET:
                 self.get_logger().info('Già abbastanza vicino al goal.')
                 return True
             else:
@@ -211,12 +213,11 @@ def navigate_to_pose(navigator: BasicNavigator, pose: PoseStamped) -> bool:
 
 def main(args=None):
     rclpy.init(args=args)
-    param = rclpy.Parameter("use_sim_time", rclpy.Parameter.Type.BOOL, False)
     node = Follow()
-    node.set_parameters([param])
     try:
         rclpy.spin(node)
     finally:
+        node._navigator.destroy_node()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
