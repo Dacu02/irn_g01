@@ -1,3 +1,4 @@
+import math
 from typing import Literal
 import rclpy
 from rclpy.node import Node, Parameter
@@ -5,7 +6,7 @@ import cv2
 import numpy as np
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image, CameraInfo, CompressedImage
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Quaternion
 from .literals import EMPTY_MESSAGE, rvec_to_quaternion, CAMERA_FRAME
 
 # Marker info
@@ -25,7 +26,6 @@ USE_ACTIVATION_MECHANIC_WHEN_LOST: bool = True
 
 # Other
 ALWAYS_CHECK_CAMERA_PARAMETERS = False
-SKIP_FRAME = 10 # processa solo 1 frame ogni SKIP_FRAME
 
 class ArucoReader(Node):
     def __init__(self):
@@ -36,7 +36,6 @@ class ArucoReader(Node):
         self._aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
         self._aruco_params = cv2.aruco.DetectorParameters()
         self._aruco_detector = cv2.aruco.ArucoDetector(self._aruco_dict, self._aruco_params)
-
 
         # Camera parameters
         self._camera_matrix = None  # K  (3x3)
@@ -62,7 +61,6 @@ class ArucoReader(Node):
         self._lost_flag = False
         self.get_logger().info('Nodo ArucoReader avviato.')
         self._activation_flag = False # se attivare l'inseguimento dei marker
-        self._frame_count = 0
 
 
     # ------------------------------------------------------------------ #
@@ -76,9 +74,9 @@ class ArucoReader(Node):
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
         if self._activation_flag:
-            self._image_callback(msg)  # usa il callback attivo
+            self._image_callback(msg)
         else:
-            self._inactive_image_callback(msg)  # usa il callback inattivo
+            self._inactive_image_callback(msg)
 
     # ------------------------------------------------------------------ #
 
@@ -118,15 +116,8 @@ class ArucoReader(Node):
             Initial callback, used until the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
             Counts the number of frames received and activates the real callback after the threshold is reached.
         """
-        self._frame_count += 1
-        if self._frame_count < SKIP_FRAME / 2:
-            return
-
         if self._camera_matrix is None:
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
-            return
-        # Se abbiamo già attivato   la lettura, non usiamo più questo callback
-        if self._activation_flag:
             return
         
         frame = image_to_frame(msg, self.bridge)
@@ -141,9 +132,7 @@ class ArucoReader(Node):
             if self._seen_frames >= DETECT_FRAMES_THRESHOLD:
                 self.get_logger().info(f'Rilevati {self._seen_frames} frame, attivo la lettura marker!')
                 self._activation_flag = True
-                self._skip_frame_count = SKIP_FRAME - 1 # per processare subito il prossimo frame 
-                #self._image_subscription.destroy() 
-                #self._image_subscription = self.create_subscription(CompressedImage, '/oakd/rgb/preview/image_raw/compressed', self._image_callback, 10)
+
         elif SHOULD_BE_CONSECUTIVE_FRAMES:
             self._seen_frames = 0  # reset se vogliamo frame consecutivi
 
@@ -162,10 +151,6 @@ class ArucoReader(Node):
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
 
-        self._frame_count += 1
-        if self._frame_count < SKIP_FRAME:
-            return
-        self._frame_count = 0
 
         frame = image_to_frame(msg, self.bridge)
         if frame is None:
@@ -209,7 +194,6 @@ class ArucoReader(Node):
             # tvec → posizione [m] nel frame camera
             # rvec → orientamento (Rodrigues) → quaternione
             qx, qy, qz, qw = rvec_to_quaternion(rvec)
-
             pose_msg = PoseStamped()
             pose_msg.pose.position.x = float(tvec[0][0])
             pose_msg.pose.position.y = float(tvec[1][0])
@@ -218,7 +202,8 @@ class ArucoReader(Node):
             pose_msg.pose.orientation.y = qy
             pose_msg.pose.orientation.z = qz
             pose_msg.pose.orientation.w = qw
-            self._pose_publisher.publish(pose_msg)
+
+            self._pose_publisher.publish(pose_msg)   
 
             self.get_logger().info(
                 f'Marker {str(ARUCO_ID)}: x={tvec[0][0]:.3f}m  y={tvec[1][0]:.3f}m  z={tvec[2][0]:.3f}m'
@@ -263,9 +248,6 @@ class ArucoReader(Node):
             self.get_logger().info('Riattivo meccanismo di attivazione dopo perdita marker.')
             self._activation_flag = False
             self._seen_frames = 0
-            self._skip_frame_count = 0
-            #self._image_subscription.destroy() 
-            #self._image_subscription = self.create_subscription(CompressedImage, '/oakd/rgb/preview/image_raw/compressed', self._inactive_image_callback, 10)
             
 def image_to_frame(msg:Image|CompressedImage, bridge:CvBridge) -> np.ndarray:
     if isinstance(msg, Image):
@@ -278,6 +260,7 @@ def main(args=None):
     node = ArucoReader()
     
     node.set_subscriber(node.get_parameter('use_sim_time').value) # type: ignore
+    node.get_logger().info('Sim a tempo reale: ' + str(node.get_parameter('use_sim_time').value)) # type: ignore
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
