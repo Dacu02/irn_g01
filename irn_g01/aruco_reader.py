@@ -202,6 +202,8 @@ class ArucoReader(Node):
             pose_msg.pose.orientation.y = qy
             pose_msg.pose.orientation.z = qz
             pose_msg.pose.orientation.w = qw
+            pose_msg.header.stamp = self.get_clock().now().to_msg()
+            pose_msg.header.frame_id = CAMERA_FRAME
 
             self._pose_publisher.publish(pose_msg)   
 

@@ -25,9 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'aruco_reader = irn_g01.aruco_reader:main',
-            'roam = irn_g01.roam:main',
-            'follow = irn_g01.follow:main',
-            'pursue = irn_g01.pursue:main'
+            'predictive_follower = irn_g01.predictive_follower:main',
         ],
     },
 )
