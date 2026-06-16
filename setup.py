@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'aruco_reader = irn_g01.aruco_reader:main',
-            'predictive_follower = irn_g01.predictive_follower:main',
+            'predictive_follower_FSM = irn_g01.predictive_follower_FSM:main',
+            'compute_pose = irn_g01.compute_pose:main',
         ],
     },
 )

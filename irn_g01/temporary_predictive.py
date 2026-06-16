@@ -5,12 +5,11 @@ from rclpy.time import Time
 from rclpy.duration import Duration
 from geometry_msgs.msg import PoseStamped, Quaternion, Pose
 import tf2_ros
-from action_msgs.msg import GoalStatus
 from rclpy.time import Time as RclpyTime
 from nav2_simple_commander.robot_navigator import FollowPath, SmoothPath, ComputePathToPose
 from rclpy.action import ActionClient
 from std_msgs.msg import String
-from .literals import is_aruco_pose_empty, ANGLE_OFFSET, CAMERA_FRAME, quaternion_to_rpy, linear_angle_distances, KalmanTracker, yaw_to_quaternion, TransformException, get_position, TARGET_DISTANCE, TARGET_OFFSET
+from .literals import is_aruco_pose_empty, CAMERA_FRAME, quaternion_to_rpy, linear_angle_distances, KalmanTracker, yaw_to_quaternion, TransformException, get_position, TARGET_DISTANCE, TARGET_OFFSET
 from rclpy.qos import (
     QoSProfile,
     QoSDurabilityPolicy,
@@ -25,11 +24,12 @@ FULL_QOS = QoSProfile(
             depth=1
         )
 
+ANGLE_OFFSET = math.radians(25)
 BUFFER_SIZE = 10
 PLANNER = 'Smac2D'
 CONTROLLER = 'SmoothPursuit'
-FORCE_PATH_SUBSTITUTION = True
 TIMEOUT_THRESHOLD = 2#s
+
 class PredictiveFollower(Node):
 
     # ========================================================== #
@@ -74,7 +74,6 @@ class PredictiveFollower(Node):
         self._path = None
         self._next_path = None
         self._computing_path: bool = False
-        self._feedback_uuid: int = 0
         #self._is_lost = False
 
     # ========================================================== #
@@ -88,18 +87,27 @@ class PredictiveFollower(Node):
                 self.get_logger().warn('Marker perso e nessun goal attivo, il robot rimarrà fermo in attesa di nuovi goal.')
             #self._is_lost = True
             return
-        
-        robot_pose = get_position(self._tf_buffer)
-        linear_distance, angle_distance = linear_angle_distances(self._goal_pose, msg.pose)
-        if linear_distance < TARGET_OFFSET and abs(angle_distance) < ANGLE_OFFSET:
-            self.get_logger().info('Nuova posizione marker troppo vicina al goal attuale, non invio nuovi goal.')
-            self.get_logger().debug(f'Distanza lineare: {linear_distance:.2f} m, distanza angolare: {math.degrees(angle_distance):.1f}°')
-            return
+
+        # Compares turtlebot4 position with respect to the marker
+        if self._goal_pose is None:
+            linear_distance, angle_distance = linear_angle_distances(get_position(self._tf_buffer), msg.pose)
+            if linear_distance < TARGET_OFFSET and abs(angle_distance) < ANGLE_OFFSET:
+                self.get_logger().info('Marker troppo vicino e già ben orientato, non invio nuovi goal.')
+                self.get_logger().debug(f'Distanza lineare: {linear_distance:.2f} m, distanza angolare: {math.degrees(angle_distance):.1f}°')
+                return
+
+        # Compares goal position with respect to the marker
+        else:
+            linear_distance, angle_distance = linear_angle_distances(self._goal_pose, msg.pose)
+            if linear_distance < TARGET_OFFSET and abs(angle_distance) < ANGLE_OFFSET:
+                self.get_logger().info('Nuova posizione marker troppo vicina al goal attuale, non invio nuovi goal.')
+                self.get_logger().debug(f'Distanza lineare: {linear_distance:.2f} m, distanza angolare: {math.degrees(angle_distance):.1f}°')
+                return
 
         self.get_logger().info('Nuova posizione marker in mappa: distanza sufficiente')
         if self._goal_pose is None:
             self.get_logger().info('Nuova posizione marker in mappa: distanza dal target sufficiente, invio nuovo goal.')
-            self.send_goal(msg.pose, robot_pose)
+            self.send_goal(msg.pose, get_position(self._tf_buffer))
             self._goal_pose = msg.pose
         else:
             self.get_logger().info('Nuova posizione marker in mappa: distanza dal target sufficiente, prenoto nuovo goal.')
@@ -125,8 +133,8 @@ class PredictiveFollower(Node):
         start_msg.pose = initial_pose
 
         compute_path_goal = ComputePathToPose.Goal(
-            use_start=not FORCE_PATH_SUBSTITUTION,
-            start=start_msg if not FORCE_PATH_SUBSTITUTION else None,
+            use_start=True,
+            start=start_msg,
             goal=goal_msg,
             planner_id=PLANNER
         )
@@ -142,9 +150,6 @@ class PredictiveFollower(Node):
         if not goal_handle.accepted:
             self.get_logger().error('ComputePathToPose goal rejected.')
             self._computing_path = False
-            self._path = self._next_path = None
-            self._next_goal_pose = None
-
             return
 
         self.get_logger().info('ComputePathToPose goal accepted, waiting for result...')
@@ -156,8 +161,6 @@ class PredictiveFollower(Node):
         if result is None or not result.path.poses:
             self.get_logger().error('ComputePathToPose failed to compute a path.')
             self._computing_path = False
-            self._path = self._next_path = None
-            self._next_goal_pose = None
             return
 
         self.get_logger().info('Path computed successfully, sending to smoother...')
@@ -175,8 +178,6 @@ class PredictiveFollower(Node):
         if not goal_handle.accepted:
             self.get_logger().error('SmoothPath goal rejected.')
             self._computing_path = False
-            self._next_goal_pose = None
-            self._path = None
             return
 
         self.get_logger().info('SmoothPath goal accepted, waiting for result...')
@@ -187,35 +188,16 @@ class PredictiveFollower(Node):
         result = future.result().result
         if result is None or not result.path.poses:
             self.get_logger().error('SmoothPath failed to smooth the path.')
-            self._next_goal_pose = None
-            self._path = None
             self._computing_path = False
             return
 
-        if FORCE_PATH_SUBSTITUTION:
-            # SOSTITUZIONE AL VOLO: Inviamo subito il percorso al controller
-            self.get_logger().info('Sostituzione al volo attivata: invio il nuovo path al FollowPath!')
-            self._path = result.path
-            follow_path_goal = FollowPath.Goal(path=self._path, controller_id=CONTROLLER)
-            self._feedback_uuid += 1
-            self._follow_path_client.send_goal_async(
-                follow_path_goal, 
-                self._follow_path_feedback_callback,
-                self._feedback_uuid
-            ).add_done_callback(self._follow_path_response_callback)
-            
-            self._next_path = None
-            #self._computing_path = False # Sblocchiamo il lock
-
-        elif self._path is None:
+        if self._path is None:
             self.get_logger().info('Path smoothed successfully, sending to FollowPath...')
             self._path = result.path
             follow_path_goal = FollowPath.Goal(path=self._path, controller_id=CONTROLLER)
-            self._feedback_uuid += 1
             self._follow_path_client.send_goal_async(
                 follow_path_goal, 
-                self._follow_path_feedback_callback,
-                self._feedback_uuid
+                self._follow_path_feedback_callback
             ).add_done_callback(self._follow_path_response_callback)
         elif self._next_path is None:
             self.get_logger().info('Path smoothed ma coda con più path da seguire, sostituzione del path in coda con il nuovo path smoothed.')
@@ -230,10 +212,7 @@ class PredictiveFollower(Node):
     # The following section contains the callbacks for the FollowPath, whose output is the followed path
     # The feedback callback is used to check if there is a new goal available for the robot to follow, and if so, it sends a new goal while the robot is still following the current path.
 
-    def _follow_path_feedback_callback(self, feedback_msg, uuid):
-        if uuid != self._feedback_uuid:
-            self.get_logger().warn('Feedback ricevuto da un goal obsoleto, ignorando...')
-            return
+    def _follow_path_feedback_callback(self, feedback_msg):
         distance = feedback_msg.feedback.distance_to_goal
         speed    = feedback_msg.feedback.speed
 
@@ -251,10 +230,7 @@ class PredictiveFollower(Node):
             self._computing_path = True
             if self._goal_pose is None:
                 raise RuntimeError('Unexpected state: next_goal_pose is set but goal_pose is None')
-            if FORCE_PATH_SUBSTITUTION:
-                self.send_goal(self._next_goal_pose, get_position(self._tf_buffer))
-            else:
-                self.send_goal(self._next_goal_pose, self._goal_pose)
+            self.send_goal(self._next_goal_pose, self._goal_pose)
             self._goal_pose = self._next_goal_pose
             self._next_goal_pose = None
 
@@ -262,9 +238,7 @@ class PredictiveFollower(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error('FollowPath goal rejected.')
-            self._next_goal_pose = None
             self._computing_path = False
-            self._path = None
             return
 
         self.get_logger().info('FollowPath goal accepted, waiting for result...')
@@ -272,45 +246,29 @@ class PredictiveFollower(Node):
         result_future.add_done_callback(self._follow_path_result_callback)
 
     def _follow_path_result_callback(self, future):
-        status_code = future.result().code
+        result = future.result().result
+        if result is None:
+            self.get_logger().error('FollowPath failed to follow the path.')
+            self._computing_path = False
+            return
 
-        match status_code:
-            case GoalStatus.STATUS_SUCCEEDED:
-                self.get_logger().info('FollowPath completato.')
-            case GoalStatus.STATUS_ABORTED:
-                self.get_logger().error('FollowPath abortito.')
-                self._computing_path = False
-                self._path = None
-                self._goal_pose = None
-                return
-            case GoalStatus.STATUS_CANCELED:
-                self.get_logger().warn('FollowPath sostituito.')
-                return
-            case _:
-                self.get_logger().error(f'FollowPath ha restituito un codice di stato inaspettato: {status_code}')
-                return
+        self.get_logger().info('FollowPath completed successfully.')
 
-        if not FORCE_PATH_SUBSTITUTION and self._next_path is not None:
-            # C'è un percorso in coda: avvia il nuovo FollowPath
-            self.get_logger().info('Invio del prossimo percorso in coda...')
+        if self._next_path is not None:
             follow_path_goal = FollowPath.Goal(path=self._next_path, controller_id=CONTROLLER)
             self._follow_path_client.send_goal_async(
-                follow_path_goal,
+                follow_path_goal, 
                 self._follow_path_feedback_callback
             ).add_done_callback(self._follow_path_response_callback)
-            self._path = self._next_path
-            self._next_path = None
-            # NON toccare _computing_path: rimane True perché il nuovo percorso è in esecuzione.
         else:
-            # Nessun altro percorso: reset completo dello stato
-            self.get_logger().info('Nessun percorso in coda, in attesa di nuovi marker...')
+            self.get_logger().info('No new path to follow, waiting for new goals...')
             self._goal_pose = None
-            self._path = None
-            self._next_goal_pose = None
-            self._computing_path = False   # solo qui rilasciamo il lock
+            # TODO Politica di timeout: se non arriva un nuovo goal entro un certo tempo, fermare il robot e aspettare nuovi goal
 
-        # self._next_path = None          ← RIMUOVI queste righe
-        # self._computing_path = False    ← perché causano il bug
+        
+        self._path = self._next_path
+        self._next_path = None
+        self._computing_path = False
 
         #if self._is_lost:
         #    self.get_logger().warn('Marker perso durante il follow path, attivazione modalità lost. Il robot rimarrà fermo in attesa di nuovi goal.')

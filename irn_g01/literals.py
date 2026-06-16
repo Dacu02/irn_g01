@@ -7,7 +7,8 @@ from rclpy.logging import get_logger
 from geometry_msgs.msg import Pose, PoseStamped, Quaternion
 from nav2_msgs.action import NavigateToPose
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
-from builtin_interfaces.msg import Time
+from rclpy.duration import Duration
+import tf2_ros
 EMPTY_MESSAGE = PoseStamped()
 EMPTY_MESSAGE.pose.position.x = 0.0
 EMPTY_MESSAGE.pose.position.y = 0.0
@@ -17,7 +18,16 @@ EMPTY_MESSAGE.pose.orientation.y = 0.0
 EMPTY_MESSAGE.pose.orientation.z = 0.0
 EMPTY_MESSAGE.pose.orientation.w = 1.0
 CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
+MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
+TARGET_DISTANCE = 0.15
+TARGET_OFFSET = TARGET_DISTANCE / 3
+ANGLE_OFFSET = math.radians(25)
+
+
+class TransformException(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
 
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
@@ -98,29 +108,6 @@ def linear_angle_distances(old_pose: Pose, new_pose: Pose) -> tuple[float, float
         angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi # normalizza a [-pi, pi]
         return distance, angle_diff
 
-
-def move_towards_angle(pose: Pose, range: float) -> Pose:
-    """
-        Moves the pose towards a certain direction of range
-        Args:
-            - pose (Pose) : The pose to change
-            - range (float) : The range of movement
-    """
-    
-    q = pose.orientation
-    _, _, yaw = quaternion_to_rpy(q)
-    fwd_x = math.cos(yaw)
-    fwd_y = math.sin(yaw)
-
-    front = Pose()
-    front.position.x = pose.position.x + fwd_x * range
-    front.position.y = pose.position.y + fwd_y * range
-    front.position.z = 0.0
-
-    # Orientamento: il robot deve guardare VERSO il marker (direzione opposta a fwd)
-    yaw = math.atan2(-fwd_y, -fwd_x)
-    front.orientation.x, front.orientation.y, front.orientation.z, front.orientation.w = yaw_to_quaternion(yaw)
-    return front
 
 class KalmanTracker:
     """
@@ -254,3 +241,19 @@ class KalmanTracker:
     def reset(self) -> None:
         self._kf = self._build_filter()
         self._last_stamp = None
+
+def get_position(tf_buffer: tf2_ros.Buffer) -> Pose:
+    """
+        Returns the current position of the robot in the map using TF. 
+        Raises an exception if the transform is not available.
+    """
+    try:
+        tf = tf_buffer.lookup_transform('map', 'base_link', tf2_ros.Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
+    except Exception as e:
+        raise TransformException(str(e))
+    pose = Pose()
+    pose.position.x = tf.transform.translation.x
+    pose.position.y = tf.transform.translation.y
+    pose.position.z = tf.transform.translation.z
+    pose.orientation = tf.transform.rotation
+    return pose
