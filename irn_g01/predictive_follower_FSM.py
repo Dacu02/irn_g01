@@ -30,7 +30,7 @@ FULL_QOS = QoSProfile(
 
 PLANNER = 'Smac2D'
 CONTROLLER = 'SmoothPursuit'
-SMOOTHER = NotImplemented
+SMOOTHER = 'GolaySmoother'
 
 class State(Enum):
     IDLE = 0
@@ -80,8 +80,10 @@ class PredictiveFollowerFSM(Node):
         # Publishers
         self._controller_pub = self.create_publisher(String, 'controller_selector', FULL_QOS)
         self._planner_pub    = self.create_publisher(String, 'planner_selector',    FULL_QOS)
+        self._smoother_pub   = self.create_publisher(String, 'smoother_selector',   FULL_QOS)
         self._controller_pub.publish(String(data=CONTROLLER))
         self._planner_pub.publish(String(data=PLANNER))
+        self._smoother_pub.publish(String(data=SMOOTHER))
 
         # Subscription
         self._aruco_listener = self.create_subscription(PoseStamped, '/estimated_pose', self._aruco_callback, 10)
@@ -97,7 +99,7 @@ class PredictiveFollowerFSM(Node):
         self._next_path = None
         self._uuid: int = 0
         self._state: State = State.IDLE
-
+        self._current_follow_goal_handle: ClientGoalHandle | None = None
 
     def set_state(self, new_state: State):
         self.get_logger().info(f'State transition: {self._state.name} -> {new_state.name}')
@@ -118,11 +120,7 @@ class PredictiveFollowerFSM(Node):
         # FSM Logic
         # -------------------------------------------------------------------------------------------------------------------------------------------
         if self._state in [State.IDLE]:
-            if self._goal_pose is None: 
-                self.get_logger().info('Nuovo goal ricevuto, creando percorso...')
-                self._goal_pose = msg.pose
-            
-            if compare_poses(self._goal_pose, msg.pose): 
+            if self._goal_pose is not None and compare_poses(self._goal_pose, msg.pose):
                 return
             
             self.get_logger().info('Nuovo goal ricevuto, creando percorso...')
@@ -185,12 +183,14 @@ class PredictiveFollowerFSM(Node):
 
         if self._state in [State.IDLE]:
             self.set_state(State.COMPUTING_PATH)
+            self._goal_pose = target
         elif self._state in [State.FOLLOWING_PATH]:
             self.set_state(State.PARALLEL_COMPUTATION)
+            self._next_goal_pose = target
         else:
             return
         
-        self._goal_pose = target
+        #self._goal_pose = target
         self._compute_path_to_pose_client.send_goal_async(compute_path_goal).add_done_callback(self.create_path_callback)
 
     def create_path_callback(self, goal:Future):
@@ -198,7 +198,7 @@ class PredictiveFollowerFSM(Node):
         goal_handle: ClientGoalHandle = goal.result() # type: ignore
         if not goal_handle:
             raise FSMException('Unexpected data received in create_path_callback.')
-        elif goal_handle.status != GoalStatus.STATUS_ACCEPTED:
+        elif not goal_handle.accepted:
             self.get_logger().error('Create path rejected by server.')
             if self._state in [State.PARALLEL_COMPUTATION]:
                 self.set_state(State.FOLLOWING_PATH) 
@@ -225,10 +225,18 @@ class PredictiveFollowerFSM(Node):
     
     def smooth_path(self, path: Future):
         self.get_logger().info('Smoothing path...')
-        result: ComputePathToPose.Result = path.result() # type: ignore
+        response: ComputePathToPose.Impl.GetResultService.Response = path.result() # type: ignore
+        if response.status != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().error('Smooth path failed, cannot follow path.')
+            self.get_logger().error(f'Error code: {response.status}')
+            self.get_logger().error(f'Error message: {response.result}')
+            raise NotImplementedError('Handle this case properly.')
+        
+        result: ComputePathToPose.Result = response.result
+        
         smooth_path_goal = SmoothPath.Goal(
             path=result.path,
-            #smoother_id=SMOOTHER
+            smoother_id=SMOOTHER
         )
         
         self._smoother_client.send_goal_async(smooth_path_goal).add_done_callback(self.smooth_path_callback)
@@ -237,7 +245,7 @@ class PredictiveFollowerFSM(Node):
         goal_handle: ClientGoalHandle = goal.result() # type: ignore
         if not goal_handle:
             raise FSMException('Unexpected data received in smooth_path_callback.')
-        elif goal_handle.status != GoalStatus.STATUS_ACCEPTED:
+        elif not goal_handle.accepted:
             self.get_logger().error('Smooth path rejected by server.')
             if self._state in [State.PARALLEL_SMOOTHING]:
                 self.set_state(State.FOLLOWING_PATH) 
@@ -256,7 +264,14 @@ class PredictiveFollowerFSM(Node):
 
     def follow_path(self, path: Future):
         self.get_logger().info('Following path...')
-        result: SmoothPath.Result = path.result() # type: ignore
+        response: FollowPath.Impl.GetResultService.Response = path.result() # type: ignore
+        if response.status != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().error('Smooth path failed, cannot follow path.')
+            self.get_logger().error(f'Error code: {response.status}')
+            self.get_logger().error(f'Error message: {response.result}')
+            raise NotImplementedError('Handle this case properly.')
+        
+        result: SmoothPath.Result = response.result # type: ignore
         follow_path_goal = FollowPath.Goal(
             path=result.path,
             controller_id=CONTROLLER
@@ -274,20 +289,72 @@ class PredictiveFollowerFSM(Node):
         goal_handle: ClientGoalHandle = goal.result() # type: ignore
         if not goal_handle:
             raise FSMException('Unexpected data received in follow_path_callback.')
-        match goal_handle.status:
-            case GoalStatus.STATUS_ACCEPTED:
-                self.get_logger().info('Follow path goal accepted')
+        if goal_handle.accepted:
+            self.get_logger().info('Follow path goal accepted')
 
-                if self._state in [State.SMOOTHING_PATH] and uuid == self._uuid:
+            if self._state in [State.SMOOTHING_PATH] and uuid == self._uuid:
+                self.set_state(State.FOLLOWING_PATH)
+                self._current_follow_goal_handle = goal_handle
+            elif self._state in [State.FOLLOWING_PATH] and uuid == self._uuid: 
+                self.get_logger().info('Parallel path goal accepted')
+            elif self._state in [State.SUBSTITUTE_PATH] and uuid == self._uuid:
+                self.get_logger().info('Substitute path goal accepted')
+                self.set_state(State.FOLLOWING_PATH)
+                self._goal_pose = self._next_goal_pose
+                self._next_goal_pose = None
+                if self._current_follow_goal_handle is not None:
+                    self.get_logger().info('Canceling previous follow path goal...')
+                    self._current_follow_goal_handle.cancel_goal_async()
+                self._current_follow_goal_handle = goal_handle
+        else:
+            self.get_logger().error('Follow path goal rejected')
+            if uuid != self._uuid:
+                if self._state in [State.SUBSTITUTE_PATH]:
+                    self.get_logger().warn('Parallel path goal rejected.')
+                    self._next_goal_pose = None
                     self.set_state(State.FOLLOWING_PATH)
-                elif self._state in [State.FOLLOWING_PATH] and uuid == self._uuid: 
-                    self.get_logger().info('Parallel path goal accepted')
-                elif self._state in [State.SUBSTITUTE_PATH] and uuid == self._uuid:
-                    self.get_logger().info('Substitute path goal accepted')
-                    self.set_state(State.FOLLOWING_PATH)
+            else:
+                match self._state:
+                    case State.FOLLOWING_PATH:
+                        self.get_logger().info('Follow path goal canceled, no new goal booked, switching to IDLE.')
+                        self._goal_pose = None
+                        self.set_state(State.IDLE)
+                    case State.PARALLEL_COMPUTATION:
+                        self.get_logger().info('Follow path goal canceled, switching to computation since new goal is already booked.')
+                        self._goal_pose = self._next_goal_pose
+                        self._next_goal_pose = None
+                        self.set_state(State.COMPUTING_PATH)
+                    case State.PARALLEL_SMOOTHING:
+                        self.get_logger().info('Follow path goal canceled, switching to smoothing since new goal is already booked.')
+                        self._goal_pose = self._next_goal_pose
+                        self._next_goal_pose = None
+                        self.set_state(State.SMOOTHING_PATH)
+            return
+
+        goal_handle.get_result_async().add_done_callback(lambda f: self.follow_path_result_callback(f, uuid))
+
+    def follow_path_result_callback(self, result: Future, uuid: int):
+        status = result.result().status # type: ignore
+        if status is None:
+            raise FSMException('Follow path result has no status, something went wrong.')
+        if uuid != self._uuid:
+            self.get_logger().warn('Received follow path result for an old goal, ignoring.')
+            return
+        match status:
+            case GoalStatus.STATUS_ABORTED:
+                self.get_logger().error('Follow path goal aborted')
+                if self._state in [State.SUBSTITUTE_PATH] and uuid != self._uuid:
+                    self.get_logger().warn('Follow path goal aborted, but a new goal is already booked, switching to it.')
                     self._goal_pose = self._next_goal_pose
                     self._next_goal_pose = None
-            
+                    self.set_state(State.FOLLOWING_PATH)
+
+                elif self._state in [State.FOLLOWING_PATH] and uuid == self._uuid:
+                    self.get_logger().error('Follow path goal aborted and no new goal booked, switching to IDLE.')
+                    self._goal_pose = None
+                    self._current_follow_goal_handle = None
+                    self.set_state(State.IDLE)
+                
             case GoalStatus.STATUS_CANCELED:
                 self.get_logger().error('Follow path goal canceled')
                 if uuid != self._uuid:
@@ -312,28 +379,7 @@ class PredictiveFollowerFSM(Node):
                             self._goal_pose = self._next_goal_pose
                             self._next_goal_pose = None
                             self.set_state(State.SMOOTHING_PATH)
-                return
 
-        goal_handle.get_result_async().add_done_callback(lambda f: self.follow_path_result_callback(f, uuid))
-
-    def follow_path_result_callback(self, result: Future, uuid: int):
-        status = result.result().status # type: ignore
-        if status is None:
-            raise FSMException('Follow path result has no status, something went wrong.')
-        match status:
-            case GoalStatus.STATUS_ABORTED:
-                self.get_logger().error('Follow path goal aborted')
-                if self._state in [State.SUBSTITUTE_PATH] and uuid != self._uuid:
-                    self.get_logger().warn('Follow path goal aborted, but a new goal is already booked, switching to it.')
-                    self._goal_pose = self._next_goal_pose
-                    self._next_goal_pose = None
-                    self.set_state(State.FOLLOWING_PATH)
-
-                elif self._state in [State.FOLLOWING_PATH] and uuid == self._uuid:
-                    self.get_logger().error('Follow path goal aborted and no new goal booked, switching to IDLE.')
-                    self._goal_pose = None
-                    self.set_state(State.IDLE)
-                
             case GoalStatus.STATUS_SUCCEEDED:
                 self.get_logger().info('Follow path goal succeeded')
                 if uuid != self._uuid:

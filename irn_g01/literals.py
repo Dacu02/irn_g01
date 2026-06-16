@@ -20,9 +20,9 @@ EMPTY_MESSAGE.pose.orientation.w = 1.0
 CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
-TARGET_DISTANCE = 0.15
+TARGET_DISTANCE = 0.2
 TARGET_OFFSET = TARGET_DISTANCE / 3
-ANGLE_OFFSET = math.radians(25)
+ANGLE_OFFSET = math.radians(15)
 
 
 class TransformException(Exception):

@@ -14,7 +14,7 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='dacu',
-    maintainer_email='daddek9@gmail.com',   
+    maintainer_email='daddek9@gmail.com',
     description='TODO: Package description',
     license='TODO: License declaration',
     extras_require={
