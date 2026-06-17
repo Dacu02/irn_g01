@@ -5,11 +5,11 @@ from rclpy.duration import Duration
 from rclpy.time import Time as RclpyTime
 import tf2_ros
 from tf2_ros import Time
-from .literals import EMPTY_MESSAGE, ANGLE_OFFSET, MAX_TRANSFORM_WAIT_TIME, KalmanTracker, is_aruco_pose_empty, TransformException, CAMERA_FRAME, quaternion_to_rpy, yaw_to_quaternion, TARGET_OFFSET, TARGET_DISTANCE, linear_angle_distances, get_position
+from .literals import EMPTY_MESSAGE, ANGLE_OFFSET, MAX_TRANSFORM_WAIT_TIME, KalmanTracker, is_aruco_pose_empty, TransformException, CAMERA_FRAME, quaternion_to_rpy, yaw_to_quaternion, TARGET_OFFSET, TARGET_DISTANCE, linear_angle_distances, get_position, AVOID_ARUCO_ANGLE
 from tf2_geometry_msgs import do_transform_pose
 from geometry_msgs.msg import Pose, PoseStamped, Quaternion
-RETREAT_WHEN_TOO_CLOSE = True
-POSES_TO_LOST = 2
+RETREAT_WHEN_TOO_CLOSE = False
+POSES_TO_LOST = 1
 class ComputePose(Node):
     def __init__(self):
         super().__init__('compute_pose')
@@ -38,6 +38,7 @@ class ComputePose(Node):
         if not self._tf_ready:
             return  # Skip processing until TF is ready
         self.get_logger().info(f'Received ArUco pose: x{msg.pose.position.x:.2f}, y{msg.pose.position.y:.2f}, z{msg.pose.position.z:.2f}')
+        
         if is_aruco_pose_empty(msg):
             try:
                 front_pose = PoseStamped()
@@ -57,16 +58,19 @@ class ComputePose(Node):
                 return
             return
         self.get_logger().info('Marker visibile, aggiornando tracker con la nuova posa.')
+        robot_pose = get_position(self._tf_buffer)
         map_pose = PoseStamped()
         map_pose.pose = self._transform_marker_pose_to_map(msg)
         map_pose.header = msg.header
-
+        if AVOID_ARUCO_ANGLE:
+            yaw = math.atan2(map_pose.pose.position.y, map_pose.pose.position.x)
+            qx, qy, qz, qw = yaw_to_quaternion(math.pi + yaw)
+            map_pose.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
         front_pose = PoseStamped()
         front_pose.pose = compute_front_pose(map_pose.pose, distance=TARGET_DISTANCE)
         self.get_logger().info(f'Calcolando posa frontale: marker at ({map_pose.pose.position.x:.2f}, {map_pose.pose.position.y:.2f}), yaw {math.degrees(quaternion_to_rpy(map_pose.pose.orientation)[2]):.2f}°, front at ({front_pose.pose.position.x:.2f}, {front_pose.pose.position.y:.2f}, yaw {math.degrees(quaternion_to_rpy(front_pose.pose.orientation)[2]):.2f}°)')
         front_pose.header = msg.header
         self._tracker.update(front_pose)
-        robot_pose = get_position(self._tf_buffer)
         estimated_pose = self._tracker.estimated_pose
 
         linear_distance, angle_distance = linear_angle_distances(robot_pose, estimated_pose)
@@ -75,7 +79,7 @@ class ComputePose(Node):
             self.get_logger().debug(f'Distanza lineare: {linear_distance:.2f} m, distanza angolare: {math.degrees(angle_distance):.1f}°')
             return
         
-        if RETREAT_WHEN_TOO_CLOSE and linear_angle_distances(estimated_pose, map_pose.pose)[0] > linear_angle_distances(robot_pose, map_pose.pose)[0]:
+        if not RETREAT_WHEN_TOO_CLOSE and linear_angle_distances(estimated_pose, map_pose.pose)[0] > linear_angle_distances(robot_pose, map_pose.pose)[0]:
             self.get_logger().info('Marker dietro il robot, distanza: {}, non invio nuovi goal.'.format(linear_angle_distances(estimated_pose, map_pose.pose)[0]))
             return
         
@@ -88,7 +92,7 @@ class ComputePose(Node):
     def _transform_marker_pose_to_map(self, marker_pose: PoseStamped|Pose) -> Pose:
         """Transforms the marker pose from frame to map frame using TF."""
         if isinstance(marker_pose, PoseStamped):
-            source_frame = marker_pose.header.frame_id
+            source_frame = CAMERA_FRAME # TODO: Use marker_pose.header.frame_id
             pose = marker_pose.pose
         else:
             source_frame = CAMERA_FRAME
@@ -112,8 +116,11 @@ def compute_front_pose(marker_map_pose: Pose, distance: float) -> Pose:
         L'asse Z del marker ArUco punta verso la telecamera (robot),
         quindi il target è: marker_pos + Z_marker_in_mappa * distance.
         """
-        q = marker_map_pose.orientation
-        _, _, yaw = quaternion_to_rpy(q)
+        if not AVOID_ARUCO_ANGLE:
+            q = marker_map_pose.orientation
+            _, _, yaw = quaternion_to_rpy(q)
+        else:
+            yaw = math.atan2(marker_map_pose.position.y, marker_map_pose.position.x)
         fwd_x = math.cos(yaw)
         fwd_y = math.sin(yaw)
 

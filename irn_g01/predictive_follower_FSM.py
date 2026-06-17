@@ -11,7 +11,7 @@ from rclpy.time import Time as RclpyTime
 from nav2_simple_commander.robot_navigator import FollowPath, SmoothPath, ComputePathToPose
 from rclpy.action import ActionClient
 from std_msgs.msg import String
-from .literals import is_aruco_pose_empty, ANGLE_OFFSET, CAMERA_FRAME, quaternion_to_rpy, linear_angle_distances, KalmanTracker, yaw_to_quaternion, TransformException, get_position, TARGET_DISTANCE, TARGET_OFFSET
+from .literals import is_aruco_pose_empty, ANGLE_OFFSET, CAMERA_FRAME, quaternion_to_rpy, linear_angle_distances, yaw_to_quaternion, TransformException, get_position, TARGET_DISTANCE, TARGET_OFFSET
 from rclpy.qos import (
     QoSProfile,
     QoSDurabilityPolicy,
@@ -230,7 +230,13 @@ class PredictiveFollowerFSM(Node):
             self.get_logger().error('Smooth path failed, cannot follow path.')
             self.get_logger().error(f'Error code: {response.status}')
             self.get_logger().error(f'Error message: {response.result}')
-            raise NotImplementedError('Handle this case properly.')
+            if self._state in [State.PARALLEL_SMOOTHING]:
+                self.set_state(State.FOLLOWING_PATH) 
+                self._next_goal_pose = None
+            elif self._state in [State.SMOOTHING_PATH]:
+                self.set_state(State.IDLE)
+                self._goal_pose = None
+            return
         
         result: ComputePathToPose.Result = response.result
         
@@ -269,8 +275,14 @@ class PredictiveFollowerFSM(Node):
             self.get_logger().error('Smooth path failed, cannot follow path.')
             self.get_logger().error(f'Error code: {response.status}')
             self.get_logger().error(f'Error message: {response.result}')
-            raise NotImplementedError('Handle this case properly.')
-        
+            if self._state in [State.PARALLEL_SMOOTHING]:
+                self.set_state(State.FOLLOWING_PATH) 
+                self._next_goal_pose = None
+            elif self._state in [State.SMOOTHING_PATH]:
+                self.set_state(State.IDLE)
+                self._goal_pose = None
+            return
+
         result: SmoothPath.Result = response.result # type: ignore
         follow_path_goal = FollowPath.Goal(
             path=result.path,
@@ -304,7 +316,6 @@ class PredictiveFollowerFSM(Node):
                 self._next_goal_pose = None
                 if self._current_follow_goal_handle is not None:
                     self.get_logger().info('Canceling previous follow path goal...')
-                    self._current_follow_goal_handle.cancel_goal_async()
                 self._current_follow_goal_handle = goal_handle
         else:
             self.get_logger().error('Follow path goal rejected')
