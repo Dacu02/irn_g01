@@ -6,9 +6,9 @@ import cv2
 import numpy as np
 from cv_bridge import CvBridge  
 from sensor_msgs.msg import Image, CameraInfo, CompressedImage
-from geometry_msgs.msg import PoseStamped, Quaternion
-from .literals import EMPTY_MESSAGE, CAMERA_FRAME
-
+from geometry_msgs.msg import Pose, PoseStamped, Quaternion
+from .literals import EMPTY_MESSAGE, CAMERA_FRAME, quaternion_to_rpy
+from scipy.spatial.transform import Rotation
 # Marker info
 MARKER_LENGTH = .2  # es. 20 cm
 ARUCO_ID = 372 # ID marker
@@ -23,7 +23,6 @@ LOST_CONDITION: Literal['frame', 'time', 'AND', 'OR'] = 'OR'
 DETECT_FRAMES_THRESHOLD: int = 3 
 SHOULD_BE_CONSECUTIVE_FRAMES: bool = True
 USE_ACTIVATION_MECHANIC_WHEN_LOST: bool = True
-
 # Other
 ALWAYS_CHECK_CAMERA_PARAMETERS = False
 
@@ -147,7 +146,7 @@ class ArucoReader(Node):
             Active callback, used after the marker is assumed to be detected (DETECT_FRAMES_THRESHOLD).
             Detects the marker, estimates its pose, and publishes it. If the marker is lost, counts lost frames and time, and publishes EMPTY_MESSAGE if the lost condition is met.
         """
-        if self._camera_matrix is None:
+        if self._camera_matrix is None or self._dist_coeffs is None:
             self.get_logger().warn('CameraInfo non ancora ricevuta, salto il frame.', throttle_duration_sec=2.0)
             return
 
@@ -171,44 +170,28 @@ class ArucoReader(Node):
             corner = corners[idx][0]  # shape (4, 2)
             img_points = corner.astype(np.float32)  # proiezioni 2D dei 4 angoli del marker
 
-            # ---- STIMA DELLA POSA con solvePnP ----
-            # Risolve: dati punti 3D noti (obj_points) e loro
-            # proiezioni 2D (img_points), trova R e t della camera
-            ok, rvec, tvec = cv2.solvePnP(
-                self._obj_points,
-                img_points,
+            # ---- STIMA DELLA POSA con estimatePoseSingleMarkers ----
+            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                corners[idx],       # shape: (1, 4, 2)
+                MARKER_LENGTH,
                 self._camera_matrix,
-                self._dist_coeffs, # type: ignore
-                flags=cv2.SOLVEPNP_IPPE_SQUARE  # ottimale per marker quadrati
-            ) # type: ignore
-
-            if not ok:
-                self.get_logger().error('solvePnP ha fallito!')
-                return
-            
+                self._dist_coeffs
+            )  # type: ignore
+            rvec = rvecs[0]
+            tvec = tvecs[0]
             cv2.aruco.drawDetectedMarkers(frame, corners, ids)   # contorno verde + ID
             if self._dist_coeffs is None:
                 raise ValueError("Distortion coefficients are not available")
-            cv2.drawFrameAxes(frame, self._camera_matrix, self._dist_coeffs, rvec, tvec, MARKER_LENGTH * 0.5)
-
-            # tvec → posizione [m] nel frame camera
-            # rvec → orientamento (Rodrigues) → quaternione
-            qx, qy, qz, qw = rvec_to_quaternion(rvec) # TODO -90 dovrebbe andare
+            cv2.drawFrameAxes(frame, self._camera_matrix, self._dist_coeffs, rvec, tvec, MARKER_LENGTH * 2)
             pose_msg = PoseStamped()
-            pose_msg.pose.position.x = float(tvec[0][0])
-            pose_msg.pose.position.y = float(tvec[1][0])
-            pose_msg.pose.position.z = float(tvec[2][0])
-            pose_msg.pose.orientation.x = qx
-            pose_msg.pose.orientation.y = qy
-            pose_msg.pose.orientation.z = qz
-            pose_msg.pose.orientation.w = qw
+            pose_msg.pose = rvec_tvec_to_pose(rvec, tvec)
             pose_msg.header.stamp = self.get_clock().now().to_msg()
             pose_msg.header.frame_id = CAMERA_FRAME
 
             self._pose_publisher.publish(pose_msg)   
 
             self.get_logger().info(
-                f'Marker {str(ARUCO_ID)}: x={pose_msg.pose.position.x:.3f}m  y={pose_msg.pose.position.y:.3f}m  z={pose_msg.pose.position.z:.3f}m'
+                f'Marker {str(ARUCO_ID)}: x={pose_msg.pose.position.x:.3f}m  y={pose_msg.pose.position.y:.3f}m  z={pose_msg.pose.position.z:.3f}m yaw={math.degrees(quaternion_to_rpy(pose_msg.pose.orientation)[2]):.1f}°'
             )
         else:
             self.get_logger().debug('Marker non rilevato.')
@@ -275,44 +258,25 @@ def main(args=None):
 if __name__ == '__main__':
     main()
 
-def quaternion_multiply(q1, q2) -> tuple[float, float, float, float]:
-    """Moltiplica due quaternioni (x, y, z, w)."""
-    x1, y1, z1, w1 = q1
-    x2, y2, z2, w2 = q2
-    return (
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2,
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
-    )
-
-def yaw_quat(deg: float) -> tuple[float, float, float, float]:
-    """Quaternione puro di rotazione attorno all'asse Z."""
-    half = np.radians(deg) / 2
-    return (0.0, 0.0, np.sin(half), np.cos(half))
-
-def rvec_to_quaternion(rvec, yaw_offset_deg: float = 0.0) -> tuple[float, float, float, float]:
-    """Converte rotation vector (Rodrigues) → quaternione (x, y, z, w).
-    
-    yaw_offset_deg: offset di yaw in gradi da applicare dopo la conversione.
-                    Usa +90 o -90 per i test.
+def rvec_tvec_to_pose(rvec, tvec) -> Pose:
     """
-    R, _ = cv2.Rodrigues(rvec)
-    trace = R[0,0] + R[1,1] + R[2,2]
-    if trace > 0:
-        s = 0.5 / np.sqrt(trace + 1.0)
-        q = (R[2,1]-R[1,2])*s, (R[0,2]-R[2,0])*s, (R[1,0]-R[0,1])*s, 0.25/s
-    elif R[0,0] > R[1,1] and R[0,0] > R[2,2]:
-        s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
-        q = 0.25*s, (R[0,1]+R[1,0])/s, (R[0,2]+R[2,0])/s, (R[2,1]-R[1,2])/s
-    elif R[1,1] > R[2,2]:
-        s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
-        q = (R[0,1]+R[1,0])/s, 0.25*s, (R[1,2]+R[2,1])/s, (R[0,2]-R[2,0])/s
-    else:
-        s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
-        q = (R[0,2]+R[2,0])/s, (R[1,2]+R[2,1])/s, 0.25*s, (R[1,0]-R[0,1])/s
+    Converte rvec/tvec OpenCV in PoseStamped nel frame ottico.
+    rvec: (1,3) Rodrigues  |  tvec: (1,3) traslazione in metri
+    """
+    # Rodrigues → matrice di rotazione → quaternione
+    R, _ = cv2.Rodrigues(rvec)                      # R: (3,3)
+    rot = Rotation.from_matrix(R)
+    qx, qy, qz, qw = rot.as_quat()                 # scipy: [x, y, z, w]
+    
+    pose = Pose()
 
-    if yaw_offset_deg != 0.0:
-        q = quaternion_multiply(q, yaw_quat(yaw_offset_deg))
+    pose.position.x = float(tvec[0][0])
+    pose.position.y = float(tvec[0][1])
+    pose.position.z = float(tvec[0][2])
 
-    return q
+    pose.orientation.x = qx
+    pose.orientation.y = qy
+    pose.orientation.z = qz
+    pose.orientation.w = qw
+
+    return pose
