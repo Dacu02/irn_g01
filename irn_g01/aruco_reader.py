@@ -15,14 +15,9 @@ ARUCO_ID = 372 # ID marker
 ARUCO_DICT = cv2.aruco.DICT_4X4_1000
 
 # Lost mechanic
-MAX_MARKER_LOST_TIME:int = 5 #s
-MAX_MARKER_LOST_FRAMES:int = 5
-LOST_CONDITION: Literal['frame', 'time', 'AND', 'OR'] = 'OR'
-
-# Activation mechanic
 DETECT_FRAMES_THRESHOLD: int = 3 
 SHOULD_BE_CONSECUTIVE_FRAMES: bool = True
-USE_ACTIVATION_MECHANIC_WHEN_LOST: bool = True
+
 # Other
 ALWAYS_CHECK_CAMERA_PARAMETERS = False
 
@@ -195,45 +190,14 @@ class ArucoReader(Node):
             )
         else:
             self.get_logger().debug('Marker non rilevato.')
-            #self._pose_publisher.publish(EMPTY_MESSAGE)
+            self._pose_publisher.publish(EMPTY_MESSAGE)
             
             self._lost_frames += 1
-            elapsed_time = (self.get_clock().now() - self._timer).nanoseconds  / 1e9
             
-            lost_by_time = elapsed_time > MAX_MARKER_LOST_TIME
-            lost_by_frames = self._lost_frames > MAX_MARKER_LOST_FRAMES
 
-            if LOST_CONDITION == 'time' and lost_by_time:
-                self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s (soglia {MAX_MARKER_LOST_TIME}s)')
-                self.aruco_lost()
-            elif LOST_CONDITION == 'frame' and lost_by_frames:
-                self.get_logger().warn(f'Marker perso da {self._lost_frames} frame (soglia {MAX_MARKER_LOST_FRAMES} frame)')
-                self.aruco_lost()
-            elif LOST_CONDITION == 'AND' and lost_by_time and lost_by_frames:
-                self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s e {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s e {MAX_MARKER_LOST_FRAMES} frame)')
-                self.aruco_lost()
-            elif LOST_CONDITION == 'OR' and (lost_by_time or lost_by_frames):
-                self.get_logger().warn(f'Marker perso da {elapsed_time:.1f}s o {self._lost_frames} frame (soglie: {MAX_MARKER_LOST_TIME}s o {MAX_MARKER_LOST_FRAMES} frame)')
-                self.aruco_lost()
-            
         cv2.imshow('ArUco Camera View', frame)
         cv2.waitKey(1)
 
-    def aruco_lost(self):
-        """
-            Called when the ArUco marker is lost.
-                - Publishes EMPTY_MESSAGE to indicate loss.
-                - If USE_ACTIVATION_MECHANIC_WHEN_LOST is True, resets the activation mechanic to allow re-detection.
-        """
-        if not self._lost_flag:
-            self._pose_publisher.publish(EMPTY_MESSAGE)
-            self._lost_flag = True
-            self.get_logger().info('Marker perso: pubblicato messaggio vuoto.')
-        if USE_ACTIVATION_MECHANIC_WHEN_LOST:
-            self.get_logger().info('Riattivo meccanismo di attivazione dopo perdita marker.')
-            self._activation_flag = False
-            self._seen_frames = 0
-            
 def image_to_frame(msg:Image|CompressedImage, bridge:CvBridge) -> np.ndarray:
     if isinstance(msg, Image):
         return bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')

@@ -5,7 +5,7 @@ from rclpy.duration import Duration
 from rclpy.time import Time as RclpyTime
 import tf2_ros
 from tf2_ros import Time
-from .literals import EMPTY_MESSAGE, ANGLE_OFFSET, MAX_TRANSFORM_WAIT_TIME, KalmanTracker, is_aruco_pose_empty, TransformException, CAMERA_FRAME, quaternion_to_rpy, yaw_to_quaternion, TARGET_OFFSET, TARGET_DISTANCE, linear_angle_distances, get_position, AVOID_ARUCO_ANGLE
+from .literals import EMPTY_MESSAGE, ANGLE_OFFSET, MAX_TRANSFORM_WAIT_TIME, KalmanTracker, is_aruco_pose_empty, TransformException, CAMERA_FRAME, quaternion_to_rpy, yaw_to_quaternion, TARGET_OFFSET, TARGET_DISTANCE, linear_angle_distances, get_position
 from tf2_geometry_msgs import do_transform_pose
 from geometry_msgs.msg import Pose, PoseStamped, Quaternion
 RETREAT_WHEN_TOO_CLOSE = False
@@ -63,10 +63,9 @@ class ComputePose(Node):
         self._lost_counter = 0
         self.get_logger().info('Marker visibile, calcolo della posa stimata con regole custom...')
 
-        # Ottieni la posizione attuale del robot per i controlli di distanza a fine funzione
         robot_pose = get_position(self._tf_buffer)
 
-        # 1. UNICA TRASFORMAZIONE: Ottieni la posa della telecamera rispetto alla mappa
+        # 1. UNICA TRASFORMAZIONE
         try:
             if self._tf_buffer.can_transform('map', CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME)):
                 tf = self._tf_buffer.lookup_transform("map", CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
@@ -77,36 +76,23 @@ class ComputePose(Node):
             self.get_logger().warn(f'Errore durante il lookup del TF: {str(e)}')
             return
 
-        # Estrai coordinate e Heading (Yaw) globale della telecamera
         camera_x = tf.transform.translation.x
         camera_y = tf.transform.translation.y
         _, _, camera_yaw = quaternion_to_rpy(tf.transform.rotation)
 
-        # Estrai il Pitch nativo dell'ArUco rispetto alla telecamera
         _, p_aruco, _ = quaternion_to_rpy(msg.pose.orientation)
 
         # 2. APPLICAZIONE REGOLE CUSTOM
-        # Lo spostamento Z dell'aruco diventa lo spostamento X (avanti) del target
-        # Applichiamo qui direttamente il TARGET_DISTANCE per fermarci prima del marker
         forward_dist = msg.pose.position.z - TARGET_DISTANCE
-        
-        # Lo spostamento X dell'aruco diventa lo spostamento Y (laterale) del target
         lateral_dist = msg.pose.position.x
 
-        # Proietta gli offset locali nella mappa globale usando il Yaw della telecamera
-        # Invertendo i segni di lateral_dist, forziamo la proiezione verso DESTRA
         map_x = camera_x + (forward_dist * math.cos(camera_yaw) + lateral_dist * math.sin(camera_yaw))
         map_y = camera_y + (forward_dist * math.sin(camera_yaw) - lateral_dist * math.cos(camera_yaw))
 
-        # La rotazione attorno al pitch dell'aruco determina lo yaw globale della stimata
-        # La rotazione attorno al pitch dell'aruco determina lo yaw globale della stimata
-        if AVOID_ARUCO_ANGLE:
-            target_yaw = math.atan2(map_y, map_x)
-        else:
-            # 1. Sottraiamo p_aruco perché asse Y ottico (giù) e Z mappa (su) sono opposti
-            # 2. Aggiungiamo math.pi (180 gradi) per far puntare la freccia VERSO il marker. 
-            # (Se vuoi che il robot dia le spalle al muro, rimuovi "+ math.pi")
-            target_yaw = camera_yaw - p_aruco #+ math.pi
+        # 1. Sottraiamo p_aruco perché asse Y ottico (giù) e Z mappa (su) sono opposti
+        # 2. Aggiungiamo math.pi (180 gradi) per far puntare la freccia VERSO il marker. 
+        # (Se vuoi che il robot dia le spalle al muro, rimuovi "+ math.pi")
+        target_yaw = camera_yaw - p_aruco #+ math.pi
 
         # Normalizza l'angolo tra -pi e pi e converti in Quaternione
         target_yaw = (target_yaw + math.pi) % (2 * math.pi) - math.pi
@@ -156,21 +142,17 @@ class ComputePose(Node):
     def _transform_marker_pose_to_map(self, marker_pose: PoseStamped|Pose) -> Pose:
         """Transforms the marker pose from frame to map frame using TF."""
         if isinstance(marker_pose, PoseStamped):
-            source_frame = CAMERA_FRAME # TODO: Use marker_pose.header.frame_id
             pose = marker_pose.pose
         else:
-            source_frame = CAMERA_FRAME
             pose = marker_pose
+
         try:
-            if self._tf_buffer.can_transform('map', source_frame, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME)):
-                tf = self._tf_buffer.lookup_transform("map", source_frame, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
-                return do_transform_pose(pose, tf)
+            tf = self._tf_buffer.lookup_transform("map", CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
+            return do_transform_pose(pose, tf)
 
         except Exception as e:
             self.get_logger().warn(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
             raise TransformException(f'Errore durante la trasformazione del marker in mappa: {str(e)}')
-        self.get_logger().error(f'Transform map -> {source_frame} non disponibile, impossibile trasformare la posa del marker in mappa!')
-        raise TransformException(f'Transform map -> {source_frame} non disponibile, impossibile trasformare la posa del marker in mappa!')
     
 def compute_front_pose(marker_map_pose: Pose, distance: float) -> Pose:
         """
@@ -180,11 +162,8 @@ def compute_front_pose(marker_map_pose: Pose, distance: float) -> Pose:
         L'asse Z del marker ArUco punta verso la telecamera (robot),
         quindi il target è: marker_pos + Z_marker_in_mappa * distance.
         """
-        if not AVOID_ARUCO_ANGLE:
-            q = marker_map_pose.orientation
-            _, _, yaw = quaternion_to_rpy(q)
-        else:
-            yaw = math.atan2(marker_map_pose.position.y, marker_map_pose.position.x)
+        q = marker_map_pose.orientation
+        _, _, yaw = quaternion_to_rpy(q)
         fwd_x = math.cos(yaw)
         fwd_y = math.sin(yaw)
 

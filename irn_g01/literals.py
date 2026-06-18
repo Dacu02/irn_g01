@@ -22,7 +22,6 @@ EMPTY_MESSAGE.pose.orientation.w = 1.0
 CAMERA_FRAME = 'base_link'
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
-AVOID_ARUCO_ANGLE = False
 TARGET_DISTANCE = .45
 TARGET_OFFSET = TARGET_DISTANCE / 3
 ANGLE_OFFSET = math.radians(20)
@@ -106,24 +105,17 @@ class KalmanTracker:
         self._last_stamp: RclpyTime | None = None
 
     def _build_filter(self) -> KalmanFilter:
-        dim_x = 4 if AVOID_ARUCO_ANGLE else 6
-        dim_z = 2 if AVOID_ARUCO_ANGLE else 3
+        dim_x = 4
+        dim_z = 2
         kf = KalmanFilter(dim_x=dim_x, dim_z=dim_z)
 
-        if AVOID_ARUCO_ANGLE:
-            kf.H = np.array([[1, 0, 0, 0],
-                            [0, 0, 1, 0]])
-            kf.R = np.diag([CAMERA_POSITION_UNCERTAINTY**2,
-                            CAMERA_POSITION_UNCERTAINTY**2])
-            kf.P = np.diag([1.0, 10.0, 1.0, 10.0])
-        else:
-            kf.H = np.array([[1, 0, 0, 0, 0, 0],
-                            [0, 0, 1, 0, 0, 0],
-                            [0, 0, 0, 0, 1, 0]])
-            kf.R = np.diag([CAMERA_POSITION_UNCERTAINTY**2,
-                            CAMERA_POSITION_UNCERTAINTY**2,
-                            CAMERA_ANGLE_UNCERTAINTY**2])
-            kf.P = np.diag([1.0, 10.0, 1.0, 10.0, 0.5, 5.0])
+        kf.H = np.array([[1, 0, 0, 0, 0, 0],
+                        [0, 0, 1, 0, 0, 0],
+                        [0, 0, 0, 0, 1, 0]])
+        kf.R = np.diag([CAMERA_POSITION_UNCERTAINTY**2,
+                        CAMERA_POSITION_UNCERTAINTY**2,
+                        CAMERA_ANGLE_UNCERTAINTY**2])
+        kf.P = np.diag([1.0, 10.0, 1.0, 10.0, 0.5, 5.0])
 
         # Placeholder – sovrascritto a ogni step da _do_predict
         kf.F = np.eye(dim_x)
@@ -132,22 +124,14 @@ class KalmanTracker:
 
     def _F(self, dt: float) -> np.ndarray:
         """Matrice di transizione a velocità costante."""
-        if not AVOID_ARUCO_ANGLE:
-            return np.array([
-                [1, dt, 0,  0,  0,  0 ],
-                [0, 1,  0,  0,  0,  0 ],
-                [0, 0,  1,  dt, 0,  0 ],
-                [0, 0,  0,  1,  0,  0 ],
-                [0, 0,  0,  0,  1,  dt],
-                [0, 0,  0,  0,  0,  1 ],
-            ])
-        else:
-            return np.array([
-                [1, dt, 0,  0 ],
-                [0, 1,  0,  0 ],
-                [0, 0,  1,  dt],
-                [0, 0,  0,  1 ],
-            ])
+        return np.array([
+            [1, dt, 0,  0,  0,  0 ],
+            [0, 1,  0,  0,  0,  0 ],
+            [0, 0,  1,  dt, 0,  0 ],
+            [0, 0,  0,  1,  0,  0 ],
+            [0, 0,  0,  0,  1,  dt],
+            [0, 0,  0,  0,  0,  1 ],
+        ])
 
     def _Q(self, dt: float) -> np.ndarray:
         """
@@ -156,11 +140,8 @@ class KalmanTracker:
         che scala correttamente con dt.
         """
         q_xy = Q_discrete_white_noise(dim=2, dt=dt, var=SIGMA_ACCEL ** 2)
-        if AVOID_ARUCO_ANGLE:
-            return block_diag(q_xy, q_xy)                                   # 4×4
-        else:
-            q_ang = Q_discrete_white_noise(dim=2, dt=dt, var=SIGMA_ALPHA ** 2)
-            return block_diag(q_xy, q_xy, q_ang)                            # 6×6
+        q_ang = Q_discrete_white_noise(dim=2, dt=dt, var=SIGMA_ALPHA ** 2)
+        return block_diag(q_xy, q_xy, q_ang)                            # 6×6
 
     def _do_predict(self, dt: float) -> Pose:
         self._kf.F = self._F(dt)
@@ -172,35 +153,26 @@ class KalmanTracker:
     def update(self, pose: PoseStamped) -> None:
         """Chiamare a ogni frame ArUco valido: predict(dt) + update."""
         stamp = RclpyTime.from_msg(pose.header.stamp)
-        if not AVOID_ARUCO_ANGLE:
-            yaw = quaternion_to_rpy(pose.pose.orientation)[2]
-            saved_yaw = self._kf.x[4] if self._last_stamp is not None else yaw
 
-            # Corregge il salto di discontinuità del yaw (es. da +pi a -pi)
-            if self._last_stamp is not None:
-                yaw = saved_yaw + ((yaw - saved_yaw + math.pi) % (2 * math.pi) - math.pi)
+        yaw = quaternion_to_rpy(pose.pose.orientation)[2]
+        saved_yaw = self._kf.x[4] if self._last_stamp is not None else yaw
 
-            
-            z = np.array([
-                pose.pose.position.x,
-                pose.pose.position.y,
-                yaw,
-            ])
+        # Corregge il salto di discontinuità del yaw (es. da +pi a -pi)
+        if self._last_stamp is not None:
+            yaw = saved_yaw + ((yaw - saved_yaw + math.pi) % (2 * math.pi) - math.pi)
 
-            if self._last_stamp is None:
-                # Prima misura: inizializza la posizione, velocità = 0
-                self._kf.x = np.array([z[0], 0.0, z[1], 0.0, yaw, 0.0])
-                self._last_stamp = stamp
-                return
-        else:
-            z = np.array([
-                pose.pose.position.x,
-                pose.pose.position.y,
-            ])
-            if self._last_stamp is None:
-                self._kf.x = np.array([z[0], 0.0, z[1], 0.0])
-                self._last_stamp = stamp
-                return
+        
+        z = np.array([
+            pose.pose.position.x,
+            pose.pose.position.y,
+            yaw,
+        ])
+
+        if self._last_stamp is None:
+            # Prima misura: inizializza la posizione, velocità = 0
+            self._kf.x = np.array([z[0], 0.0, z[1], 0.0, yaw, 0.0])
+            self._last_stamp = stamp
+            return
 
         dt = (stamp - self._last_stamp).nanoseconds * 1e-9
         if dt <= 0.0:
@@ -237,12 +209,8 @@ class KalmanTracker:
         pose.position.x = float(self._kf.x[0])
         pose.position.y = float(self._kf.x[2])
         pose.position.z = 0.0
-        if not AVOID_ARUCO_ANGLE:
-            yaw = float(self._kf.x[4])
-            pose.orientation.x, pose.orientation.y, \
-                pose.orientation.z, pose.orientation.w = yaw_to_quaternion(yaw)
-        else:
-            pose.orientation.x = pose.orientation.y = pose.orientation.z = pose.orientation.w = 0.0
+        yaw = float(self._kf.x[4])
+        pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w = yaw_to_quaternion(yaw)
         return pose
 
     def reset(self) -> None:
