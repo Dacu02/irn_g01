@@ -21,7 +21,7 @@ EMPTY_MESSAGE.pose.orientation.w = 1.0
 CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
-AVOID_ARUCO_ANGLE = True
+AVOID_ARUCO_ANGLE = False
 TARGET_DISTANCE = 1
 TARGET_OFFSET = TARGET_DISTANCE / 3
 ANGLE_OFFSET = math.radians(15)
