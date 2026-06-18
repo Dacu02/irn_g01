@@ -18,14 +18,14 @@ EMPTY_MESSAGE.pose.orientation.y = 0.0
 EMPTY_MESSAGE.pose.orientation.z = 0.0
 EMPTY_MESSAGE.pose.orientation.w = 1.0
 #CAMERA_FRAME = "turtlebot4/oakd_rgb_camera_frame/rgbd_camera"
-CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
+#CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
+CAMERA_FRAME = 'base_link'
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
 AVOID_ARUCO_ANGLE = False
-TARGET_DISTANCE = 1
+TARGET_DISTANCE = .45
 TARGET_OFFSET = TARGET_DISTANCE / 3
-ANGLE_OFFSET = math.radians(15)
-
+ANGLE_OFFSET = math.radians(20)
 
 class TransformException(Exception):
     def __init__(self, message: str):
@@ -39,7 +39,7 @@ from rclpy.time import Time as RclpyTime
 from geometry_msgs.msg import Pose, PoseStamped
 
 CAMERA_POSITION_UNCERTAINTY = 0.05        # m   – deviazione standard
-CAMERA_ANGLE_UNCERTAINTY    = math.radians(50)  # rad
+CAMERA_ANGLE_UNCERTAINTY    = math.radians(25)  # rad
 SIGMA_ACCEL  = 1.5   # m/s²   – accelerazione massima stimata per un umano
 SIGMA_ALPHA  = 1.5   # rad/s² – accelerazione angolare massima
 

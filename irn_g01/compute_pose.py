@@ -16,6 +16,7 @@ class ComputePose(Node):
         self._tracker = KalmanTracker()
         self._subscription = self.create_subscription(PoseStamped, '/aruco/pose', self.pose_callback, 10)
         self._publisher = self.create_publisher(PoseStamped, '/estimated_pose', 10)
+        self._debug = self.create_publisher(PoseStamped, '/debug_pose', 10)
         self._lost_counter = 0
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -34,9 +35,10 @@ class ComputePose(Node):
         except Exception as e:
             self.get_logger().warn(f'Errore durante l\'attesa del TF: {str(e)}. Ritentando...')
 
-    def pose_callback(self, msg:PoseStamped):
+    def pose_callback(self, msg: PoseStamped):
         if not self._tf_ready:
-            return  # Skip processing until TF is ready
+            return  # Salta l'elaborazione finché il TF non è pronto
+            
         self.get_logger().info(f'Received ArUco pose: x{msg.pose.position.x:.2f}, y{msg.pose.position.y:.2f}, z{msg.pose.position.z:.2f}')
         
         if is_aruco_pose_empty(msg):
@@ -51,41 +53,103 @@ class ComputePose(Node):
                     empty_mex.header = msg.header
                     self._publisher.publish(empty_mex)
                 else:
-
                     self._publisher.publish(front_pose)
             except:
                 self._publisher.publish(msg)
                 return
             return
-        self.get_logger().info('Marker visibile, aggiornando tracker con la nuova posa.')
+
+        # Reset del contatore marker perso
+        self._lost_counter = 0
+        self.get_logger().info('Marker visibile, calcolo della posa stimata con regole custom...')
+
+        # Ottieni la posizione attuale del robot per i controlli di distanza a fine funzione
         robot_pose = get_position(self._tf_buffer)
-        map_pose = PoseStamped()
-        map_pose.pose = self._transform_marker_pose_to_map(msg)
-        map_pose.header = msg.header
+
+        # 1. UNICA TRASFORMAZIONE: Ottieni la posa della telecamera rispetto alla mappa
+        try:
+            if self._tf_buffer.can_transform('map', CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME)):
+                tf = self._tf_buffer.lookup_transform("map", CAMERA_FRAME, Time(), timeout=Duration(seconds=MAX_TRANSFORM_WAIT_TIME))
+            else:
+                self.get_logger().error(f'Transform map -> {CAMERA_FRAME} non disponibile!')
+                return
+        except Exception as e:
+            self.get_logger().warn(f'Errore durante il lookup del TF: {str(e)}')
+            return
+
+        # Estrai coordinate e Heading (Yaw) globale della telecamera
+        camera_x = tf.transform.translation.x
+        camera_y = tf.transform.translation.y
+        _, _, camera_yaw = quaternion_to_rpy(tf.transform.rotation)
+
+        # Estrai il Pitch nativo dell'ArUco rispetto alla telecamera
+        _, p_aruco, _ = quaternion_to_rpy(msg.pose.orientation)
+
+        # 2. APPLICAZIONE REGOLE CUSTOM
+        # Lo spostamento Z dell'aruco diventa lo spostamento X (avanti) del target
+        # Applichiamo qui direttamente il TARGET_DISTANCE per fermarci prima del marker
+        forward_dist = msg.pose.position.z - TARGET_DISTANCE
+        
+        # Lo spostamento X dell'aruco diventa lo spostamento Y (laterale) del target
+        lateral_dist = msg.pose.position.x
+
+        # Proietta gli offset locali nella mappa globale usando il Yaw della telecamera
+        # Invertendo i segni di lateral_dist, forziamo la proiezione verso DESTRA
+        map_x = camera_x + (forward_dist * math.cos(camera_yaw) + lateral_dist * math.sin(camera_yaw))
+        map_y = camera_y + (forward_dist * math.sin(camera_yaw) - lateral_dist * math.cos(camera_yaw))
+
+        # La rotazione attorno al pitch dell'aruco determina lo yaw globale della stimata
+        # La rotazione attorno al pitch dell'aruco determina lo yaw globale della stimata
         if AVOID_ARUCO_ANGLE:
-            yaw = math.atan2(map_pose.pose.position.y, map_pose.pose.position.x)
-            qx, qy, qz, qw = yaw_to_quaternion(math.pi + yaw)
-            map_pose.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
-        front_pose = PoseStamped()
-        front_pose.pose = compute_front_pose(map_pose.pose, distance=TARGET_DISTANCE)
-        self.get_logger().info(f'Calcolando posa frontale: marker at ({map_pose.pose.position.x:.2f}, {map_pose.pose.position.y:.2f}), yaw {math.degrees(quaternion_to_rpy(map_pose.pose.orientation)[2]):.2f}°, front at ({front_pose.pose.position.x:.2f}, {front_pose.pose.position.y:.2f}, yaw {math.degrees(quaternion_to_rpy(front_pose.pose.orientation)[2]):.2f}°)')
-        front_pose.header = msg.header
-        self._tracker.update(front_pose)
+            target_yaw = math.atan2(map_y, map_x)
+        else:
+            # 1. Sottraiamo p_aruco perché asse Y ottico (giù) e Z mappa (su) sono opposti
+            # 2. Aggiungiamo math.pi (180 gradi) per far puntare la freccia VERSO il marker. 
+            # (Se vuoi che il robot dia le spalle al muro, rimuovi "+ math.pi")
+            target_yaw = camera_yaw - p_aruco #+ math.pi
+
+        # Normalizza l'angolo tra -pi e pi e converti in Quaternione
+        target_yaw = (target_yaw + math.pi) % (2 * math.pi) - math.pi
+        qx, qy, qz, qw = yaw_to_quaternion(target_yaw)
+
+        # Normalizza l'angolo tra -pi e pi e converti in Quaternione
+        target_yaw = (target_yaw + math.pi) % (2 * math.pi) - math.pi
+        qx, qy, qz, qw = yaw_to_quaternion(target_yaw)
+
+        # 3. COSTRUZIONE POSA FINALE STIMATA
+        map_pose = PoseStamped()
+        map_pose.header.stamp = msg.header.stamp
+        map_pose.header.frame_id = 'map'
+        map_pose.pose.position.x = map_x
+        map_pose.pose.position.y = map_y
+        map_pose.pose.position.z = 0.0
+        map_pose.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
+
+        # Pubblica posa di debug
+        debug_msg = PoseStamped()
+        debug_msg.pose = map_pose.pose
+        debug_msg.header = map_pose.header
+        self._debug.publish(debug_msg)
+
+        # Aggiorna il filtro Kalman con la nuova posa calcolata in mappa
+        self._tracker.update(map_pose)
         estimated_pose = self._tracker.estimated_pose
 
+        self.get_logger().info(f'Posa calcolata: map_x={map_x:.2f}, map_y={map_y:.2f}, yaw={math.degrees(target_yaw):.2f}°')
+
+        # Controlli di sicurezza sulle distanze per l'invio dei goal
         linear_distance, angle_distance = linear_angle_distances(robot_pose, estimated_pose)
         if linear_distance < TARGET_DISTANCE + TARGET_OFFSET and abs(angle_distance) < ANGLE_OFFSET:
             self.get_logger().info('Marker troppo vicino e già ben orientato, non invio nuovi goal.')
-            self.get_logger().debug(f'Distanza lineare: {linear_distance:.2f} m, distanza angolare: {math.degrees(angle_distance):.1f}°')
             return
         
         if not RETREAT_WHEN_TOO_CLOSE and linear_angle_distances(estimated_pose, map_pose.pose)[0] > linear_angle_distances(robot_pose, map_pose.pose)[0]:
-            self.get_logger().info('Marker dietro il robot, distanza: {}, non invio nuovi goal.'.format(linear_angle_distances(estimated_pose, map_pose.pose)[0]))
+            self.get_logger().info('Marker dietro il robot, non invio nuovi goal.')
             return
         
         output_pose = PoseStamped()
         output_pose.pose = estimated_pose
-        output_pose.header = msg.header
+        output_pose.header = map_pose.header
         self.get_logger().info('Marker visibile, pubblicando posa stimata: x:{:.2f}, y:{:.2f}, yaw:{:.2f}'.format(estimated_pose.position.x, estimated_pose.position.y, math.degrees(quaternion_to_rpy(estimated_pose.orientation)[2]))) 
         self._publisher.publish(output_pose)
 
@@ -130,8 +194,8 @@ def compute_front_pose(marker_map_pose: Pose, distance: float) -> Pose:
         front.position.z = 0.0
 
         # Orientamento: il robot deve guardare VERSO il marker (direzione opposta a fwd)
-        oppposed_yaw = (yaw + math.pi) % (2 * math.pi) - math.pi  # Normalizza tra -pi e pi
-        qx, qy, qz, qw = yaw_to_quaternion(oppposed_yaw)
+        opposed_yaw = (yaw + math.pi) % (2 * math.pi) - math.pi  # Normalizza tra -pi e pi
+        qx, qy, qz, qw = yaw_to_quaternion(opposed_yaw)
         front.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
 
         return front
