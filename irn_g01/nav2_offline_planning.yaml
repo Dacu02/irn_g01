@@ -82,28 +82,28 @@ controller_server:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
 
       # --- Velocità e accelerazione ---
-      max_linear_vel: 1.4
+      max_linear_vel: 3.5
       min_linear_vel: 0.10
-      max_angular_vel: 1.8
+      max_angular_vel: 2.5
       min_angular_vel: 0.2
       max_linear_accel: 1.5
       max_linear_decel: 2.5
-      max_angular_accel: 3.2
+      max_angular_accel: 2.5
       max_angular_decel: 3.2
 
       # --- Lookahead ---
       lookahead_dist: 0.8
       min_lookahead_dist: 0.4
       max_lookahead_dist: 1.2
-      lookahead_time: 1.5
+      lookahead_time: 1.2
       use_velocity_scaled_lookahead_dist: True
       use_fixed_curvature_lookahead: true
       curvature_lookahead_dist: 0.5
       interpolate_curvature_after_goal: true
 
       # --- Avvicinamento ---
-      min_approach_linear_velocity: 0.3
-      approach_velocity_scaling_dist: 0.6
+      min_approach_linear_velocity: 0.4
+      approach_velocity_scaling_dist: 0.8
 
       # --- Collisioni ---
       use_collision_detection: true
@@ -113,8 +113,8 @@ controller_server:
 
       # --- Regolazione ---
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 0.4
-      regulated_linear_scaling_min_speed: 0.25
+      regulated_linear_scaling_min_radius: 0.3
+      regulated_linear_scaling_min_speed: 0.3
       use_cost_regulated_linear_velocity_scaling: true
       cost_scaling_dist: 0.35
       cost_scaling_gain: 0.75
@@ -122,8 +122,8 @@ controller_server:
 
       # --- Rotazione ---
       use_rotate_to_heading: true
-      rotate_to_heading_angular_vel: 1.2
-      rotate_to_heading_min_angle: 0.8
+      rotate_to_heading_angular_vel: 1.5
+      rotate_to_heading_min_angle: 0.5
 
       # --- Dynamic Window ---
       use_dynamic_window: true

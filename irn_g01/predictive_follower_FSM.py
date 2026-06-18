@@ -1,10 +1,7 @@
 import math
 import rclpy
 from rclpy.node import Node
-from rclpy.time import Time
-from rclpy.duration import Duration
 from geometry_msgs.msg import PoseStamped, Quaternion, Pose
-import tf2_ros
 from rclpy.action.client import ClientGoalHandle
 from action_msgs.msg import GoalStatus
 from rclpy.time import Time as RclpyTime
@@ -87,10 +84,6 @@ class PredictiveFollowerFSM(Node):
 
         # Subscription
         self._aruco_listener = self.create_subscription(PoseStamped, '/estimated_pose', self._aruco_callback, 10)
-
-        # TF2
-        self._tf_buffer = tf2_ros.Buffer()
-        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
         # Variables
         self._goal_pose: Pose | None = None

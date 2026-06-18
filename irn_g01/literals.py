@@ -17,7 +17,7 @@ EMPTY_MESSAGE.pose.orientation.x = 0.0
 EMPTY_MESSAGE.pose.orientation.y = 0.0
 EMPTY_MESSAGE.pose.orientation.z = 0.0
 EMPTY_MESSAGE.pose.orientation.w = 1.0
-#CAMERA_FRAME = "oakd_rgb_camera_frame/rgbd_camera"
+#CAMERA_FRAME = "turtlebot4/oakd_rgb_camera_frame/rgbd_camera"
 CAMERA_FRAME = "oakd_rgb_camera_optical_frame"
 MAX_TRANSFORM_WAIT_TIME:int = 2  #s
 
@@ -39,7 +39,7 @@ from rclpy.time import Time as RclpyTime
 from geometry_msgs.msg import Pose, PoseStamped
 
 CAMERA_POSITION_UNCERTAINTY = 0.05        # m   – deviazione standard
-CAMERA_ANGLE_UNCERTAINTY    = math.radians(20)  # rad
+CAMERA_ANGLE_UNCERTAINTY    = math.radians(50)  # rad
 SIGMA_ACCEL  = 1.5   # m/s²   – accelerazione massima stimata per un umano
 SIGMA_ALPHA  = 1.5   # rad/s² – accelerazione angolare massima
 
@@ -52,24 +52,7 @@ def is_aruco_pose_empty(msg:PoseStamped) -> bool:
         msg.pose.orientation.y == EMPTY_MESSAGE.pose.orientation.y and \
         msg.pose.orientation.z == EMPTY_MESSAGE.pose.orientation.z and \
         msg.pose.orientation.w == EMPTY_MESSAGE.pose.orientation.w
-        
-def rvec_to_quaternion(rvec) -> tuple[float, float, float, float]:
-    """Converte rotation vector (Rodrigues) → quaternione (x, y, z, w)."""
-    R, _ = cv2.Rodrigues(rvec)
-    trace = R[0,0] + R[1,1] + R[2,2]
-    if trace > 0:
-        s = 0.5 / np.sqrt(trace + 1.0)
-        return (R[2,1]-R[1,2])*s, (R[0,2]-R[2,0])*s, (R[1,0]-R[0,1])*s, 0.25/s
-    elif R[0,0] > R[1,1] and R[0,0] > R[2,2]:
-        s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
-        return 0.25*s, (R[0,1]+R[1,0])/s, (R[0,2]+R[2,0])/s, (R[2,1]-R[1,2])/s
-    elif R[1,1] > R[2,2]:
-        s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
-        return (R[0,1]+R[1,0])/s, 0.25*s, (R[1,2]+R[2,1])/s, (R[0,2]-R[2,0])/s
-    else:
-        s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
-        return (R[0,2]+R[2,0])/s, (R[1,2]+R[2,1])/s, 0.25*s, (R[1,0]-R[0,1])/s
-
+    
 def quaternion_to_rpy(q:Quaternion) -> tuple[float, float, float]:
     """
     Converte un quaternione (x, y, z, w)
