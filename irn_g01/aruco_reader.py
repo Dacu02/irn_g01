@@ -10,7 +10,7 @@ from geometry_msgs.msg import Pose, PoseStamped, Quaternion
 from .literals import EMPTY_MESSAGE, CAMERA_FRAME, quaternion_to_rpy
 from scipy.spatial.transform import Rotation
 # Marker info
-MARKER_LENGTH = .2  # es. 20 cm
+MARKER_LENGTH = .18  # es. 20 cm
 ARUCO_ID = 372 # ID marker
 ARUCO_DICT = cv2.aruco.DICT_4X4_1000
 

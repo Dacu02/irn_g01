@@ -143,7 +143,7 @@ class PredictiveFollowerFSM(Node):
             if self._goal_pose is None: 
                 raise FSMException('Unexpected state: FOLLOWING_PATH with no active goal.')
             
-            if compare_poses(self._goal_pose, msg.pose): 
+            if compare_poses(self._goal_pose, msg.pose, target_offset=TARGET_OFFSET): 
                 return
                 
             self.get_logger().info('Nuovo goal ricevuto durante il following, prenotando nuovo goal...')
