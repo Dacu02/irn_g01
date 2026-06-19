@@ -1,7 +1,7 @@
 import math
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, Quaternion, Pose
+from geometry_msgs.msg import PoseStamped, Quaternion, Pose, Twist
 from rclpy.action.client import ClientGoalHandle
 from action_msgs.msg import GoalStatus
 from rclpy.time import Time as RclpyTime
@@ -37,6 +37,7 @@ class State(Enum):
     PARALLEL_COMPUTATION = 4
     PARALLEL_SMOOTHING = 5
     SUBSTITUTE_PATH = 6
+    LOST = 7
 
 class FSMException(Exception):
     def __init__(self, message):
@@ -63,6 +64,7 @@ class PredictiveFollowerFSM(Node):
         self._compute_path_to_pose_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
         self._smoother_client = ActionClient(self, SmoothPath, 'smooth_path')
         self._follow_path_client = ActionClient(self, FollowPath, 'follow_path')
+        self._direct_control = self.create_publisher(Twist, "/cmd_vel", 10) # Only when the robot LOST the marker
 
         while not self._compute_path_to_pose_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('ComputePathToPose action server non disponibile!')
@@ -93,6 +95,7 @@ class PredictiveFollowerFSM(Node):
         self._uuid: int = 0
         self._state: State = State.IDLE
         self._current_follow_goal_handle: ClientGoalHandle | None = None
+        self._last_goal_pose: Pose | None = None
 
     def set_state(self, new_state: State):
         self.get_logger().info(f'State transition: {self._state.name} -> {new_state.name}')
@@ -106,10 +109,20 @@ class PredictiveFollowerFSM(Node):
 
         if is_aruco_pose_empty(msg):
             self.get_logger().warn('Marker perso, non invio nuovi goal.')
-            if self._state in [State.IDLE]:
-                self.get_logger().warn('Marker perso e nessun goal attivo, il robot rimarrà fermo in attesa di nuovi goal.')
+            #if self._state in [State.IDLE]:
+            self.get_logger().warn('Marker perso: il robot entra in modalità di controllo diretto per cercare di ritrovare il marker.')
+            self._state = State.LOST
+            if self._current_follow_goal_handle is not None:
+                self._current_follow_goal_handle.cancel_goal_async()
+            self._goal_pose = self._next_goal_pose = self._path = self._next_path = self._current_follow_goal_handle = None
+            twist = Twist()
+            #twist.linear.x = 0.1  # Move forward at 0.1 m/s
+            twist.linear.x = 0.0
+            twist.angular.z = 0.25  # Rotate at 0.3 max speed
+            self._direct_control.publish(twist)
             return
-    
+        elif self._state == State.LOST:
+            self._state = State.IDLE
         # FSM Logic
         # -------------------------------------------------------------------------------------------------------------------------------------------
         if self._state in [State.IDLE]:
@@ -143,7 +156,7 @@ class PredictiveFollowerFSM(Node):
             if self._goal_pose is None: 
                 raise FSMException('Unexpected state: FOLLOWING_PATH with no active goal.')
             
-            if compare_poses(self._goal_pose, msg.pose, target_offset=TARGET_OFFSET): 
+            if compare_poses(self._goal_pose, msg.pose, target_offset=TARGET_OFFSET * 1.5, angle_offset=ANGLE_OFFSET * 1.5): 
                 return
                 
             self.get_logger().info('Nuovo goal ricevuto durante il following, prenotando nuovo goal...')
@@ -355,7 +368,7 @@ class PredictiveFollowerFSM(Node):
 
                 elif self._state in [State.FOLLOWING_PATH] and uuid == self._uuid:
                     self.get_logger().error('Follow path goal aborted and no new goal booked, switching to IDLE.')
-                    self._goal_pose = None
+                    #self._goal_pose = None # We keep the last goal pose to allow for checks
                     self._current_follow_goal_handle = None
                     self.set_state(State.IDLE)
                 

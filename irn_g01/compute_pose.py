@@ -9,7 +9,7 @@ from .literals import EMPTY_MESSAGE, ANGLE_OFFSET, MAX_TRANSFORM_WAIT_TIME, Kalm
 from tf2_geometry_msgs import do_transform_pose
 from geometry_msgs.msg import Pose, PoseStamped, Quaternion
 RETREAT_WHEN_TOO_CLOSE = False
-POSES_TO_LOST = 1
+FRAMES_BEFORE_LOST = 30 * 7 # 5 seconds at 30 Hz
 class ComputePose(Node):
     def __init__(self):
         super().__init__('compute_pose')
@@ -47,7 +47,7 @@ class ComputePose(Node):
                 front_pose.pose = self._tracker.predict_only(RclpyTime.from_msg(msg.header.stamp))
                 front_pose.header = msg.header
                 self._lost_counter += 1
-                if self._lost_counter >= POSES_TO_LOST:
+                if self._lost_counter >= FRAMES_BEFORE_LOST:
                     self.get_logger().warn('Marker lost, publishing empty pose.')
                     empty_mex = EMPTY_MESSAGE
                     empty_mex.header = msg.header
@@ -123,7 +123,7 @@ class ComputePose(Node):
 
         self.get_logger().info(f'Posa calcolata: map_x={map_x:.2f}, map_y={map_y:.2f}, yaw={math.degrees(target_yaw):.2f}°')
 
-        # Controlli di sicurezza sulle distanze per l'invio dei goal
+        # Controlli di sicurezza sulle distanze 
         linear_distance, angle_distance = linear_angle_distances(robot_pose, estimated_pose)
         if linear_distance < TARGET_DISTANCE + TARGET_OFFSET and abs(angle_distance) < ANGLE_OFFSET:
             self.get_logger().info('Marker troppo vicino e già ben orientato, non invio nuovi goal.')

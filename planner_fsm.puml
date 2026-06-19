@@ -1,0 +1,26 @@
+@startuml Path_Planner_FSM
+[*] --> IDLE
+IDLE: Attesa di goal
+COMPUTE_PATH: Calcolo del percorso
+SMOOTH_PATH: Smussamento del percorso
+FOLLOW_PATH: Esecuzione del percorso
+PARALLEL_COMPUTATION: Calcolo del nuovo percorso in parallelo
+PARALLEL_SMOOTHING: Smussamento del nuovo percorso
+PATH_SUBSTITUTION: Sostituzione del percorso 
+
+IDLE --> COMPUTE_PATH: Goal ricevuto
+COMPUTE_PATH --> SMOOTH_PATH: Percorso calcolato
+SMOOTH_PATH --> FOLLOW_PATH: Percorso smussato
+FOLLOW_PATH --> IDLE: Goal raggiunto
+FOLLOW_PATH --> PARALLEL_COMPUTATION: Nuovo goal ricevuto
+PARALLEL_COMPUTATION --> PARALLEL_SMOOTHING: Nuovo percorso calcolato
+COMPUTE_PATH -[#red]-> IDLE
+SMOOTH_PATH -[#red]-> IDLE
+FOLLOW_PATH -[#red]-> IDLE
+PARALLEL_COMPUTATION -[#red]-> FOLLOW_PATH
+PARALLEL_SMOOTHING -[#red]-> FOLLOW_PATH
+PARALLEL_COMPUTATION -[#green]-> COMPUTE_PATH
+PARALLEL_SMOOTHING -[#green]-> SMOOTH_PATH
+PATH_SUBSTITUTION --> FOLLOW_PATH
+PARALLEL_SMOOTHING --> PATH_SUBSTITUTION: Nuovo percorso smussato
+@enduml

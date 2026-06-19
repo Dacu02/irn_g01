@@ -82,27 +82,27 @@ controller_server:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
 
       # --- Velocità e accelerazione ---
-      max_linear_vel: 0.5
-      min_linear_vel: 0.10
-      max_angular_vel: 1
-      min_angular_vel: 0.2
-      max_linear_accel: 2.5
+      max_linear_vel: 0.2
+      min_linear_vel: 0.03        # era 0.10, abbassato
+      max_angular_vel: 0.1
+      # min_angular_vel: RIMOSSO  ← causa principale dell'oscillazione
+      max_linear_accel: 1.0
       max_linear_decel: 2.5
-      max_angular_accel: 1.0
+      max_angular_accel: 0.125
       max_angular_decel: 3.2
 
-      # --- Lookahead ---
-      lookahead_dist: 0.8
-      min_lookahead_dist: 0.4
-      max_lookahead_dist: 1.2
-      lookahead_time: 1.2
+      # --- Lookahead (aumentato per stabilità) ---
+      lookahead_dist: 1.0          # era 0.8
+      min_lookahead_dist: 0.6      # era 0.4 → troppo piccolo
+      max_lookahead_dist: 1.5      # era 1.2
+      lookahead_time: 1.5          # era 1.2
       use_velocity_scaled_lookahead_dist: True
       use_fixed_curvature_lookahead: true
-      curvature_lookahead_dist: 0.5
+      curvature_lookahead_dist: 0.7  # era 0.5
       interpolate_curvature_after_goal: true
 
       # --- Avvicinamento ---
-      min_approach_linear_velocity: 0.4
+      min_approach_linear_velocity: 0.15  # era 0.4, troppo alta
       approach_velocity_scaling_dist: 0.8
 
       # --- Collisioni ---
@@ -113,20 +113,19 @@ controller_server:
 
       # --- Regolazione ---
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 0.3
-      regulated_linear_scaling_min_speed: 0.3
+      regulated_linear_scaling_min_radius: 0.45
+      regulated_linear_scaling_min_speed: 0.25
       use_cost_regulated_linear_velocity_scaling: true
       cost_scaling_dist: 0.35
       cost_scaling_gain: 0.75
-      inflation_cost_scaling_factor: 3.5   # ← COPIA dal costmap locale!
+      inflation_cost_scaling_factor: 3.5
 
       # --- Rotazione ---
       use_rotate_to_heading: false
       rotate_to_heading_angular_vel: 1.5
-      rotate_to_heading_min_angle: 0.5
+      rotate_to_heading_min_angle: 0.785
 
-      # --- Dynamic Window ---
-      use_dynamic_window: true
+      # use_dynamic_window: RIMOSSO ← non è un parametro RPP
 
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"

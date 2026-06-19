@@ -17,7 +17,6 @@ ARUCO_DICT = cv2.aruco.DICT_4X4_1000
 # Lost mechanic
 DETECT_FRAMES_THRESHOLD: int = 3 
 SHOULD_BE_CONSECUTIVE_FRAMES: bool = True
-
 # Other
 ALWAYS_CHECK_CAMERA_PARAMETERS = False
 
@@ -190,7 +189,9 @@ class ArucoReader(Node):
             )
         else:
             self.get_logger().debug('Marker non rilevato.')
-            self._pose_publisher.publish(EMPTY_MESSAGE)
+            emtpy_mex = EMPTY_MESSAGE
+            emtpy_mex.header.stamp = self.get_clock().now().to_msg()
+            self._pose_publisher.publish(emtpy_mex)
             
             self._lost_frames += 1
             
