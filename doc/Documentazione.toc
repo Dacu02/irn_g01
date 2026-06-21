@@ -1,0 +1,19 @@
+\babel@toc {italian}{}\relax 
+\babel@toc {italian}{}\relax 
+\contentsline {section}{\numberline {1}Introduzione}{2}{section.1}%
+\contentsline {section}{\numberline {2}Architettura}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}\texttt {Aruco\_Reader}}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Esplorazione}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Inseguimento}{3}{subsection.2.3}%
+\contentsline {subsubsection}{\numberline {2.3.1}\href {https://docs.nav2.org/configuration/packages/configuring-smac-planner.html}{Path Planner}}{4}{subsubsection.2.3.1}%
+\contentsline {subsubsection}{\numberline {2.3.2}\href {https://docs.nav2.org/configuration/packages/configuring-savitzky-golay-smoother.html}{Path Smoother}}{4}{subsubsection.2.3.2}%
+\contentsline {subsubsection}{\numberline {2.3.3}\href {https://docs.nav2.org/configuration/packages/configuring-regulated-pp.html}{Path Controller}}{4}{subsubsection.2.3.3}%
+\contentsline {subsubsection}{\numberline {2.3.4}\texttt {Compute\_Pose}}{4}{subsubsection.2.3.4}%
+\contentsline {subsubsection}{\numberline {2.3.5}\texttt {Predictive\_Follower\_FSM}}{5}{subsubsection.2.3.5}%
+\contentsline {paragraph}{\texttt {IDLE}}{5}{section*.2}%
+\contentsline {paragraph}{\texttt {COMPUTING\_PATH}}{5}{section*.3}%
+\contentsline {paragraph}{\texttt {SMOOTH\_PATH}}{5}{section*.4}%
+\contentsline {paragraph}{\texttt {FOLLOWING\_PATH}}{5}{section*.5}%
+\contentsline {paragraph}{\texttt {PARALLEL\_COMPUTATION} \& \texttt {PARALLEL\_SMOOTHING}}{6}{section*.6}%
+\contentsline {paragraph}{\texttt {SUBSTITUTE\_PATH}}{6}{section*.7}%
+\contentsline {paragraph}{\texttt {LOST}}{6}{section*.8}%
