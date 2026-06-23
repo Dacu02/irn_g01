@@ -1,0 +1,11 @@
+@startuml Comunicazione
+node "Aruco_Reader" as aruco_reader
+queue "\aruco\pose:PoseStamped" as aruco_pose
+aruco_reader --> aruco_pose
+node "Compute_Pose" as compute_pose
+aruco_pose --> compute_pose
+queue "\estimated\pose:PoseStamped" as estimated_pose
+compute_pose --> estimated_pose
+node "Predictive_Follower_FSM" as predictive_follower_fsm
+estimated_pose --> predictive_follower_fsm
+@enduml

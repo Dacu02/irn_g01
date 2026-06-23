@@ -1,0 +1,96 @@
+%% Creator: Inkscape 1.4.3 (0d15f75, 2025-12-25), www.inkscape.org
+%% PDF/EPS/PS + LaTeX output extension by Johan Engelen, 2010
+%% Accompanies image file 'follow_fsm_svg-tex.pdf' (pdf, eps, ps)
+%%
+%% To include the image in your LaTeX document, write
+%%   \input{<filename>.pdf_tex}
+%%  instead of
+%%   \includegraphics{<filename>.pdf}
+%% To scale the image, write
+%%   \def\svgwidth{<desired width>}
+%%   \input{<filename>.pdf_tex}
+%%  instead of
+%%   \includegraphics[width=<desired width>]{<filename>.pdf}
+%%
+%% Images with a different path to the parent latex file can
+%% be accessed with the `import' package (which may need to be
+%% installed) using
+%%   \usepackage{import}
+%% in the preamble, and then including the image with
+%%   \import{<path to file>}{<filename>.pdf_tex}
+%% Alternatively, one can specify
+%%   \graphicspath{{<path to file>/}}
+%% 
+%% For more information, please see info/svg-inkscape on CTAN:
+%%   http://tug.ctan.org/tex-archive/info/svg-inkscape
+%%
+\begingroup%
+  \makeatletter%
+  \providecommand\color[2][]{%
+    \errmessage{(Inkscape) Color is used for the text in Inkscape, but the package 'color.sty' is not loaded}%
+    \renewcommand\color[2][]{}%
+  }%
+  \providecommand\transparent[1]{%
+    \errmessage{(Inkscape) Transparency is used (non-zero) for the text in Inkscape, but the package 'transparent.sty' is not loaded}%
+    \renewcommand\transparent[1]{}%
+  }%
+  \providecommand\rotatebox[2]{#2}%
+  \newcommand*\fsize{\dimexpr\f@size pt\relax}%
+  \newcommand*\lineheight[1]{\fontsize{\fsize}{#1\fsize}\selectfont}%
+  \ifx\svgwidth\undefined%
+    \setlength{\unitlength}{465.32679749bp}%
+    \ifx\svgscale\undefined%
+      \relax%
+    \else%
+      \setlength{\unitlength}{\unitlength * \real{\svgscale}}%
+    \fi%
+  \else%
+    \setlength{\unitlength}{\svgwidth}%
+  \fi%
+  \global\let\svgwidth\undefined%
+  \global\let\svgscale\undefined%
+  \makeatother%
+  \begin{picture}(1,1.46979578)%
+    \lineheight{1}%
+    \setlength\tabcolsep{0pt}%
+    \put(0,0){\includegraphics[width=\unitlength,page=1]{follow_fsm_svg-tex.pdf}}%
+    \put(0.38425011,1.30943251){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}IDLE\end{tabular}}}}%
+    \put(0.32374022,1.26704794){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Attesa di goal\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=2]{follow_fsm_svg-tex.pdf}}%
+    \put(0.75858479,1.10054707){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}COMPUTE_PATH\end{tabular}}}}%
+    \put(0.72689236,1.0581625){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Calcolo del percorso\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=3]{follow_fsm_svg-tex.pdf}}%
+    \put(0.61262138,0.89167774){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}SMOOTH_PATH\end{tabular}}}}%
+    \put(0.53607487,0.84929316){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Smussamento del percorso\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=4]{follow_fsm_svg-tex.pdf}}%
+    \put(0.32617738,0.68280841){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}FOLLOW_PATH\end{tabular}}}}%
+    \put(0.26460436,0.64042378){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Esecuzione del percorso\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=5]{follow_fsm_svg-tex.pdf}}%
+    \put(0.5850203,0.47392289){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}PARALLEL_COMPUTATION\end{tabular}}}}%
+    \put(0.50292074,0.43153837){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Calcolo del nuovo percorso in parallelo\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=6]{follow_fsm_svg-tex.pdf}}%
+    \put(0.49179614,0.26505361){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}PARALLEL_SMOOTHING\end{tabular}}}}%
+    \put(0.42355718,0.22266899){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Smussamento del nuovo percorso\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=7]{follow_fsm_svg-tex.pdf}}%
+    \put(0.22321828,0.0561681){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}PATH_SUBSTITUTION\end{tabular}}}}%
+    \put(0.19112375,0.01378357){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Sostituzione del percorso\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=8]{follow_fsm_svg-tex.pdf}}%
+    \put(0.07584138,0.47392289){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}LOST\end{tabular}}}}%
+    \put(0.0084618,0.43153837){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Perdita del goal\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=9]{follow_fsm_svg-tex.pdf}}%
+    \put(0.69012788,1.1842434){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Goal ricevuto\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=10]{follow_fsm_svg-tex.pdf}}%
+    \put(0.75137515,0.97537407){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Percorso calcolato\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=11]{follow_fsm_svg-tex.pdf}}%
+    \put(0.57246863,0.76650474){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Percorso smussato\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=12]{follow_fsm_svg-tex.pdf}}%
+    \put(0.41129158,0.97537407){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Goal raggiunto\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=13]{follow_fsm_svg-tex.pdf}}%
+    \put(0.49993896,0.55761927){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Nuovo goal ricevuto\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=14]{follow_fsm_svg-tex.pdf}}%
+    \put(0.68368079,0.34874989){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Nuovo percorso calcolato\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=15]{follow_fsm_svg-tex.pdf}}%
+    \put(0.50155073,0.13986447){\color[rgb]{0,0,0}\makebox(0,0)[lt]{\lineheight{1.25}\smash{\begin{tabular}[t]{l}Nuovo percorso smussato\end{tabular}}}}%
+    \put(0,0){\includegraphics[width=\unitlength,page=16]{follow_fsm_svg-tex.pdf}}%
+  \end{picture}%
+\endgroup%

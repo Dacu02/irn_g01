@@ -1,0 +1,1 @@
+{"rule":"ER_01_001","sentence":"^\\QL'inseguimento viene governato dal seguente nodo, mediante una macchina a stati finiti.\\E$"}

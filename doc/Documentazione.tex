@@ -4,7 +4,7 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{graphicx}
 \usepackage{hyperref}
-
+\usepackage{svg}
 \title{Progetto di Intelligent Robot Navigation \\ \large Relazione Tecnica\\ \Large Gruppo 01}
 \author{Federica de Maio\quad Noemi Biancamano\quad Alex Cuciniello\quad Davide D'Acunto}
 \date{}
@@ -36,6 +36,12 @@ Il nodo \texttt{Aruco\_Reader} è stato sviluppato mediante la libreria OpenCV, 
 Questa centralizzazione della funzionalità di rilevamento è stata pensata per semplificare l'architettura e uniformare le informazioni tra i due processi principali.
 \subsection{Esplorazione}
 \subsection{Inseguimento}
+\begin{figure}[htbp]
+    \centering
+  \includesvg[inkscapelatex=false, width=\textwidth]{topicchain}
+  \caption{Diagramma a blocchi dell'area d'inseguimento, con le interazioni tra i nodi principali.}
+\end{figure}
+\noindent
 Nell'area d'inseguimento, il robot utilizza le informazioni fornite dal nodo \texttt{Aruco\_Reader} per pianificare un percorso verso il \textit{marker} identificato. Nav2 viene utilizzato per gestire la pianificazione del percorso e l'esecuzione del movimento, rilassando il problema dell'elusione degli ostacoli.
 \\[1em]
 Il robot deve essere in grado di seguire il \textit{marker} anche in presenza di brevi occlusioni, per cui è stato implementato un meccanismo di predizione basato su filtro di Kalman e la velocità del \textit{marker} prima dell'occlusione, permettendo al robot di continuare a muoversi nella direzione prevista fino a quando il \textit{marker} non viene nuovamente rilevato.
@@ -54,6 +60,11 @@ Il nodo si sottoscrive al \textit{topic} \texttt{/aruco/pose}, nella quale viene
 \\[1em]
 A causa dell'errore di misurazione della telecamera non è possibile affidarsi esclusivamente a essa per determinare la posa da raggiungere. Piuttosto, la posa "frontale" viene passata ad un filtro di \textit{Kalman} che, grazie ai delta temporali e alla conoscenza pregressa, effettua una stima più dolce che pubblica su \texttt{/estimated/pose}. Ciò risulta estremamente utile quando il robot è in movimento o sta ruotando, siccome le misurazioni diventano molto più rumorose a causa del tremolio della telecamera.
 \subsubsection{\texttt{Predictive\_Follower\_FSM}}
+\begin{figure}[htbp]
+    \centering
+  \includesvg[inkscapelatex=false, width=0.85\textwidth]{followfsm}
+  \caption{Diagramma a stati finiti del nodo \texttt{Predictive\_Follower\_FSM}, le frecce rosse indicano errori all'interno del nodo, quelle verdi la fine di un percorso precedentemente pianificato.}
+\end{figure}
 L'inseguimento viene governato dal seguente nodo, mediante una macchina a stati finiti che rappresenta le diverse fasi dell'inseguimento. Le transizioni avvengono sulla base di due eventi: 
 \begin{itemize}
     \item \texttt{/estimated/pose}: L'arrivo di una nuova posa stimata è un evento in grado di provocare una transizione di stato, in particolare quando il robot è in stato di \texttt{IDLE} oppure \texttt{FOLLOWING\_PATH}. Al contrario, l'assenza delle pose stimate (misurata mediante il numero di pose vuote) può provocare una transizione di stato verso \texttt{LOST}, che rappresenta la condizione in cui il robot non è più in grado di seguire il \textit{marker}.

@@ -13,7 +13,7 @@
 \contentsline {paragraph}{\texttt {IDLE}}{5}{section*.2}%
 \contentsline {paragraph}{\texttt {COMPUTING\_PATH}}{5}{section*.3}%
 \contentsline {paragraph}{\texttt {SMOOTH\_PATH}}{5}{section*.4}%
-\contentsline {paragraph}{\texttt {FOLLOWING\_PATH}}{5}{section*.5}%
-\contentsline {paragraph}{\texttt {PARALLEL\_COMPUTATION} \& \texttt {PARALLEL\_SMOOTHING}}{6}{section*.6}%
-\contentsline {paragraph}{\texttt {SUBSTITUTE\_PATH}}{6}{section*.7}%
-\contentsline {paragraph}{\texttt {LOST}}{6}{section*.8}%
+\contentsline {paragraph}{\texttt {FOLLOWING\_PATH}}{7}{section*.5}%
+\contentsline {paragraph}{\texttt {PARALLEL\_COMPUTATION} \& \texttt {PARALLEL\_SMOOTHING}}{7}{section*.6}%
+\contentsline {paragraph}{\texttt {SUBSTITUTE\_PATH}}{7}{section*.7}%
+\contentsline {paragraph}{\texttt {LOST}}{7}{section*.8}%
